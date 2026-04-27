@@ -1,0 +1,24 @@
+<div class="answers-panel">
+  <div class="answers-inverse">
+    <span class="answers-label">searching for evidence that says:</span>
+    <em>{{ inverse }}</em>
+  </div>
+  {% if rows %}
+    <ul class="answers-list">
+      {% for r in rows %}
+        <li class="answers-row">
+          <div class="cite">
+            <a href="/sources/{{ r.source_id }}">{{ r.cite_short }}</a>
+            {% if r.publication %} · {{ r.publication }}{% endif %}
+            <span class="answers-distance" title="cosine distance, lower = more semantically similar to the inverse claim">{{ "%.3f"|format(r.distance) }}</span>
+          </div>
+          <div class="tag-text">
+            <a href="/cards/{{ r.id }}">{{ r.tag }}</a>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="answers-empty">No corpus evidence with embeddings yet. Run <code>scripts/backfill_embeddings.py</code> first.</p>
+  {% endif %}
+</div>

@@ -15,6 +15,7 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - Pagination with result counts
   - **Workspaces** — per-user named speech-doc workspaces. Add cards or analyticals from search or card detail with one click; reorder via drag-and-drop; group entries under editable `header_path` headers; clear; export to `.docx` named after the workspace.
   - **In-browser re-highlighting** — select text in a card body inside a workspace and click highlight / underline / clear. Edits are stored as a workspace-scoped **card variant**; the canonical card is never mutated and global card detail / search continue to show the original. Revert any time.
+  - **Find evidence that answers this card** — on card detail (when `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are both set), Claude Haiku rewrites the card's tag as the strongest opposing claim, then vector-searches the corpus for cards closest to that inverse — surfacing the cuts most likely to answer this one.
   - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
 - **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,996 cards, 88 analyticals, 2,139 sources, 86 content tags, drawn from ~75 source documents).
 
@@ -70,6 +71,7 @@ src/debatabase/
   markup_ops.py                     pure span-ops for the re-highlighting flow
   auth.py                           argon2 hashing + nickname/password validation
   embeddings.py                     Voyage AI client wrapper (semantic search)
+  answer_finder.py                  Claude-driven inverse-claim generator
   web/
     app.py                          FastAPI routes
     render.py                       markup-span → HTML rendering (full/highlight-only/etc.)

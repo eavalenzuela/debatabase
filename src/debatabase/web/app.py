@@ -34,6 +34,10 @@ from debatabase.auth import (
 )
 from debatabase.config import settings
 from debatabase.db import session_scope
+from debatabase.answer_finder import (
+    generate_inverse_claim,
+    has_inverse_capability,
+)
 from debatabase.embeddings import embed_query, has_embedding_key
 from debatabase.docx_export import (
     ExportAnalytical,
@@ -543,6 +547,7 @@ def card_detail(
 
     has_highlight = any(s["kind"] == "highlight" for s in (card.markup or []))
     has_underline = any(s["kind"] == "underline" for s in (card.markup or []))
+    can_find_answers = has_inverse_capability() and has_embedding_key()
 
     return templates.TemplateResponse(
         request,
@@ -554,7 +559,74 @@ def card_detail(
             "has_highlight": has_highlight,
             "has_underline": has_underline,
             "current_workspace_id": current_workspace_id,
+            "can_find_answers": can_find_answers,
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Answer-finder: given a card, find evidence that says the inverse
+# ---------------------------------------------------------------------------
+
+ANSWERS_LIMIT = 8
+
+
+@app.get("/cards/{card_id}/answers", response_class=HTMLResponse)
+def card_answers(request: Request, card_id: int):
+    """Generate the inverse claim of `card_id`'s tag, then vector-search."""
+    if not has_inverse_capability() or not has_embedding_key():
+        return HTMLResponse(
+            '<p class="answers-empty">Set ANTHROPIC_API_KEY and '
+            'VOYAGE_API_KEY in .env to enable this.</p>',
+            status_code=503,
+        )
+
+    with session_scope() as s:
+        card = s.get(Card, card_id, options=[joinedload(Card.source)])
+        if card is None:
+            return HTMLResponse("card not found", status_code=404)
+        tag = card.tag
+
+    try:
+        inverse = generate_inverse_claim(tag)
+    except Exception as e:
+        return HTMLResponse(
+            f'<p class="answers-error">inverse-claim generation failed: '
+            f'{type(e).__name__}</p>',
+            status_code=502,
+        )
+    try:
+        qvec = embed_query(inverse)
+    except Exception as e:
+        return HTMLResponse(
+            f'<p class="answers-error">embedding failed: '
+            f'{type(e).__name__}</p>',
+            status_code=502,
+        )
+
+    with session_scope() as s:
+        rows = s.execute(
+            sqltext("""
+                SELECT cards.id, cards.tag, cards.card_text, cards.source_id,
+                       sources.cite_short, sources.publication,
+                       (cards.embedding <=> CAST(:qvec AS vector)) AS distance
+                FROM cards
+                JOIN sources ON sources.id = cards.source_id
+                WHERE cards.embedding IS NOT NULL AND cards.id != :exclude_id
+                ORDER BY cards.embedding <=> CAST(:qvec AS vector) ASC
+                LIMIT :limit
+            """),
+            {
+                "qvec": _vector_literal(qvec),
+                "exclude_id": card_id,
+                "limit": ANSWERS_LIMIT,
+            },
+        ).all()
+
+    return templates.TemplateResponse(
+        request,
+        "_card_answers.html",
+        {"inverse": inverse, "rows": rows, "source_card_id": card_id},
     )
 
 

@@ -64,5 +64,21 @@
   <div class="card-body mode-{{ mode }}">
     {{ render_card(card.card_text, card.markup or [], mode)|safe }}
   </div>
+
+  {% if can_find_answers %}
+    <div class="answers-trigger">
+      <button type="button"
+              class="answers-btn"
+              hx-get="/cards/{{ card.id }}/answers"
+              hx-target="#answers-{{ card.id }}"
+              hx-swap="innerHTML"
+              hx-disabled-elt="this"
+              hx-indicator="#answers-spinner-{{ card.id }}">
+        Find evidence that answers this card →
+      </button>
+      <span id="answers-spinner-{{ card.id }}" class="htmx-indicator">searching…</span>
+    </div>
+    <div id="answers-{{ card.id }}"></div>
+  {% endif %}
 </article>
 {% endblock %}
