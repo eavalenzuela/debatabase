@@ -19,6 +19,9 @@
       {% if total_cards_matching > 0 %}
         — showing {{ start_idx }}–{{ end_idx }} of {{ total_cards_matching }}
       {% endif %}
+      {% if semantic_active %}
+        <span class="semantic-badge" title="results blend keyword matching with semantic similarity">semantic</span>
+      {% endif %}
     </h2>
     {% if total_pages > 1 %}
       <nav class="pagination">

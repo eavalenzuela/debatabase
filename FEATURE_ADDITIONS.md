@@ -24,10 +24,13 @@ Highlights are round-specific — the 1AC read is long, the 2AC extension is six
 
 `tsvector` handles known-author / known-phrase lookups but fails on argument-shaped queries ("heg resilient", "circumvention answers"). Embeddings unlock the queries debaters actually have.
 
-- Add an embedding column on `cards.card_text` (pgvector); backfill the existing 2,996.
-- Hybrid search: blend tsvector rank with vector similarity.
-- "Answers this card →" button on card detail that retrieves semantically opposed cards (prompt Claude to generate the inverse claim, then vector-search).
-- Replace the keyword `KEYWORD_RULES` tagger in `bulk.py` with Claude-assisted tagging on ingest, constrained to the existing `content_tags` vocabulary.
+**Status:** PR 6a shipped (hybrid search + backfill); PR 6b ("answer this") and PR 6c (Claude-assisted tagging) still to come.
+
+- ✅ pgvector column on `cards` (vector(512), HNSW index over cosine distance). Voyage `voyage-3-lite` provider (`src/debatabase/embeddings.py`).
+- ✅ Backfill script (`scripts/backfill_embeddings.py`), idempotent, batched.
+- ✅ Hybrid search in `/search`: when `VOYAGE_API_KEY` is set, blend `tsvector` rank with cosine similarity. Cards without embeddings still match via keyword. Small "semantic" badge in the UI when active.
+- ⏳ "Answers this card →" button on card detail that retrieves semantically opposed cards (prompt Claude to generate the inverse claim, then vector-search).
+- ⏳ Replace the keyword `KEYWORD_RULES` tagger in `bulk.py` with Claude-assisted tagging on ingest, constrained to the existing `content_tags` vocabulary.
 
 ## 4. Duplicate / near-duplicate clustering
 

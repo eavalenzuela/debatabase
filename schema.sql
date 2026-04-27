@@ -3,6 +3,9 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS citext;
+-- pgvector: provides the `vector` type used for cards.embedding (semantic
+-- search). Requires the pgvector/pgvector:pg16 image (set in docker-compose).
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- A source is a single citable work (article, book, etc.). Multiple cards
 -- may be cut from the same source; we dedupe at the source level so
@@ -46,11 +49,17 @@ CREATE TABLE cards (
     search_tsv      TSVECTOR GENERATED ALWAYS AS (
         setweight(to_tsvector('english', coalesce(tag, '')), 'A') ||
         setweight(to_tsvector('english', coalesce(card_text, '')), 'B')
-    ) STORED
+    ) STORED,
+    -- Semantic search vector. NULL until backfilled by
+    -- scripts/backfill_embeddings.py (requires VOYAGE_API_KEY).
+    -- Dimension matches voyage-3-lite (512). Search blends this with
+    -- search_tsv when populated; falls back to tsvector-only otherwise.
+    embedding       vector(512)
 );
 CREATE INDEX cards_search_tsv_idx ON cards USING GIN (search_tsv);
 CREATE INDEX cards_source_id_idx ON cards (source_id);
 CREATE INDEX cards_tag_trgm_idx ON cards USING GIN (tag gin_trgm_ops);
+CREATE INDEX cards_embedding_hnsw_idx ON cards USING hnsw (embedding vector_cosine_ops);
 
 -- Controlled vocabulary of argument-type tags. Grown collaboratively
 -- (admin approves each one); never auto-created at ingest time.

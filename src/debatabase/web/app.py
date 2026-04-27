@@ -34,6 +34,7 @@ from debatabase.auth import (
 )
 from debatabase.config import settings
 from debatabase.db import session_scope
+from debatabase.embeddings import embed_query, has_embedding_key
 from debatabase.docx_export import (
     ExportAnalytical,
     ExportCard,
@@ -327,8 +328,29 @@ def search(
     return _search(request, q=q, tag=tag, page=page)
 
 
+def _vector_literal(vec: list[float]) -> str:
+    """pgvector accepts vectors as the textual form '[v1,v2,...]'.
+
+    Used inline in raw SQL where binding a vector via SQLAlchemy's
+    sqltext() doesn't pick up pgvector's adapter.
+    """
+    return "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
+
+
+def _embed_query_safe(q: str) -> list[float] | None:
+    """Embed `q` if a key is set; swallow API failures so search still works."""
+    if not q or not has_embedding_key():
+        return None
+    try:
+        return embed_query(q)
+    except Exception:
+        return None
+
+
 def _search(request: Request, q: str | None, tag: str | None, page: int):
     offset = (page - 1) * PAGE_SIZE
+    qvec = _embed_query_safe(q) if q else None
+    semantic_active = qvec is not None
     with session_scope() as s:
         # Base card-fetch query
         params: dict = {}
@@ -336,12 +358,24 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
         # Build WHERE clauses for cards
         where_clauses = []
         if q:
-            # tsvector match OR substring match against author_last/cite_short
-            where_clauses.append(sqltext("""(
-              cards.search_tsv @@ websearch_to_tsquery('english', :q)
-              OR sources.author_last ILIKE :q_like
-              OR sources.cite_short ILIKE :q_like
-            )"""))
+            # tsvector match OR substring match against author_last/cite_short.
+            # When semantic is on, also include cards whose embedding is
+            # close enough to the query (cosine distance < 0.5).
+            if semantic_active:
+                where_clauses.append(sqltext("""(
+                  cards.search_tsv @@ websearch_to_tsquery('english', :q)
+                  OR sources.author_last ILIKE :q_like
+                  OR sources.cite_short ILIKE :q_like
+                  OR (cards.embedding IS NOT NULL
+                      AND (cards.embedding <=> CAST(:qvec AS vector)) < 0.5)
+                )"""))
+                params["qvec"] = _vector_literal(qvec)
+            else:
+                where_clauses.append(sqltext("""(
+                  cards.search_tsv @@ websearch_to_tsquery('english', :q)
+                  OR sources.author_last ILIKE :q_like
+                  OR sources.cite_short ILIKE :q_like
+                )"""))
             params["q"] = q
             params["q_like"] = f"%{q}%"
         if tag:
@@ -371,8 +405,19 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
             card_stmt = card_stmt.where(clause)
             count_stmt = count_stmt.where(clause)
 
-        # Order: tsvector rank when query is present; else by id desc
-        if q:
+        # Order: with semantic on, blend tsvector rank with cosine
+        # similarity; cards without embeddings use ts_rank only.
+        if q and semantic_active:
+            card_stmt = card_stmt.order_by(sqltext("""
+                CASE
+                  WHEN cards.embedding IS NOT NULL THEN
+                    COALESCE(ts_rank(cards.search_tsv, websearch_to_tsquery('english', :q)), 0) * 0.5
+                    + (1 - (cards.embedding <=> CAST(:qvec AS vector))) * 0.5
+                  ELSE
+                    COALESCE(ts_rank(cards.search_tsv, websearch_to_tsquery('english', :q)), 0)
+                END DESC, cards.id DESC
+            """))
+        elif q:
             card_stmt = card_stmt.order_by(
                 sqltext("ts_rank(cards.search_tsv, websearch_to_tsquery('english', :q)) DESC, cards.id DESC")
             )
@@ -462,6 +507,7 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
             "page_size": PAGE_SIZE,
             "current_workspace_id": current_workspace_id,
             "current_user_nick": current_user_nick,
+            "semantic_active": semantic_active,
         },
     )
 

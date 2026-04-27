@@ -4,12 +4,12 @@ A searchable database of policy debate evidence cards. Built to make a personal 
 
 ## What's in here
 
-- **Postgres schema** — `sources`, `cards`, `analyticals`, an admin-curated `content_tags` vocabulary, plus join tables for both. `users` / `workspaces` / `workspace_entries` / `card_variants` for the prep side. Full-text search via `tsvector`; tag hierarchy via `parent_id`.
+- **Postgres schema** — `sources`, `cards`, `analyticals`, an admin-curated `content_tags` vocabulary, plus join tables for both. `users` / `workspaces` / `workspace_entries` / `card_variants` for the prep side. Full-text search via `tsvector`; semantic search via `pgvector` (HNSW index on a `vector(512)` column); tag hierarchy via `parent_id`.
 - **`.docx` extractor** — `python-docx`-based, with the catch that Word formatting can come from direct run properties OR from character styles (e.g. `<w:rStyle w:val="StyleUnderline"/>`). The extractor parses `styles.xml` and resolves character-style inheritance so underlines and highlights aren't silently lost.
 - **`.docx` exporter** — the inverse path: workspace → `.docx` with Heading 1/2/3 hierarchy from each entry's `header_path`, the standard tag → cite-short → raw-cite Verbatim cite block, and underline/highlight runs reconstructed from the markup spans. Round-trip tested against the extractor.
 - **Bulk ingest pipeline** — walks a folder of `.docx` files, segments them into cards (and analyticals — see below), auto-parses cite lines, infers content tags from keywords against a controlled vocabulary, and inserts. Successful files are moved to `parsed_docs/`.
 - **Web UI** (FastAPI + Jinja2 + HTMX + Sortable.js):
-  - Live search across tag / body / author / cite shorthand
+  - Live search across tag / body / author / cite shorthand. When `VOYAGE_API_KEY` is set and the corpus has been embedded, results blend `tsvector` rank with cosine similarity over Voyage `voyage-3-lite` vectors — argument-shaped queries ("heg resilient", "circumvention answers") work, not just author/phrase lookups.
   - Card detail with **render mode toggle**: full / underline-only / **highlight-only (in-round read text)** / plain
   - Hierarchical tag sidebar with collapsible parent groups
   - Pagination with result counts
@@ -69,6 +69,7 @@ src/debatabase/
   docx_export.py                    workspace → .docx (inverse of parser/extract.py)
   markup_ops.py                     pure span-ops for the re-highlighting flow
   auth.py                           argon2 hashing + nickname/password validation
+  embeddings.py                     Voyage AI client wrapper (semantic search)
   web/
     app.py                          FastAPI routes
     render.py                       markup-span → HTML rendering (full/highlight-only/etc.)
@@ -79,6 +80,7 @@ scripts/
   ingest_*.py                       one-shot scripts from the early per-card training session
   reingest_indexerror_docs.py       fix-up script for the trailing-H4 bug
   cleanup_cite_shorts.py            quality pass on auto-parsed cite shortcuts
+  backfill_embeddings.py            one-shot semantic-search backfill (needs VOYAGE_API_KEY)
 tests/                              pytest suite (export round-trip + markup ops)
 ```
 
@@ -106,6 +108,19 @@ uv run pytest
 ```
 
 The suite covers the `.docx` export round-trip (export → re-extract → assert spans match) and the markup-ops merge / split / normalize logic. Web routes are smoke-tested manually for now.
+
+## Semantic search (optional)
+
+To turn on hybrid keyword + semantic ranking on `/search`:
+
+1. Get a Voyage AI API key (https://www.voyageai.com/) and put it in `.env` as `VOYAGE_API_KEY=…`. The corpus uses `voyage-3-lite` (512 dimensions, ~$0.02 per million tokens — embedding the full 2,996-card seed costs about a cent).
+2. Backfill the existing corpus once:
+   ```bash
+   uv run python scripts/backfill_embeddings.py
+   ```
+   The script is idempotent — re-running it only embeds rows where `cards.embedding IS NULL`. About a minute for 3k cards.
+
+After backfill, queries against `/search` blend `tsvector` rank with cosine similarity. Cards without embeddings still match via keyword — graceful fallback. A small **semantic** badge appears next to the result count when the blend is active.
 
 ## Status
 

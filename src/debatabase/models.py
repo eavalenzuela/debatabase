@@ -11,8 +11,11 @@ from sqlalchemy import (
     Text,
     func,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from debatabase.embeddings import EMBEDDING_DIM
 
 
 class Base(DeclarativeBase):
@@ -51,6 +54,7 @@ class Card(Base):
     source_file: Mapped[str | None] = mapped_column(Text)
     block_path: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
     source: Mapped[Source] = relationship(back_populates="cards")
     content_tag_links: Mapped[list["CardContentTag"]] = relationship(
