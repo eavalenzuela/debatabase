@@ -16,6 +16,7 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - **Workspaces** — per-user named speech-doc workspaces. Add cards or analyticals from search or card detail with one click; reorder via drag-and-drop; group entries under editable `header_path` headers; clear; export to `.docx` named after the workspace.
   - **In-browser re-highlighting** — select text in a card body inside a workspace and click highlight / underline / clear. Edits are stored as a workspace-scoped **card variant**; the canonical card is never mutated and global card detail / search continue to show the original. Revert any time.
   - **Find evidence that answers this card** — on card detail (when `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are both set), Claude Haiku rewrites the card's tag as the strongest opposing claim, then vector-searches the corpus for cards closest to that inverse — surfacing the cuts most likely to answer this one.
+  - **Claude-assisted tagging** — bulk ingest sends each card to Haiku with the existing `content_tags` vocabulary; output is constrained to known slugs and lands as `status='proposed'` so an admin can promote. `scripts/retag_cards.py` runs the same flow over the existing corpus.
   - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
 - **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,996 cards, 88 analyticals, 2,139 sources, 86 content tags, drawn from ~75 source documents).
 
@@ -72,6 +73,7 @@ src/debatabase/
   auth.py                           argon2 hashing + nickname/password validation
   embeddings.py                     Voyage AI client wrapper (semantic search)
   answer_finder.py                  Claude-driven inverse-claim generator
+  tagger.py                         Claude-driven content-tag proposer
   web/
     app.py                          FastAPI routes
     render.py                       markup-span → HTML rendering (full/highlight-only/etc.)
@@ -83,6 +85,7 @@ scripts/
   reingest_indexerror_docs.py       fix-up script for the trailing-H4 bug
   cleanup_cite_shorts.py            quality pass on auto-parsed cite shortcuts
   backfill_embeddings.py            one-shot semantic-search backfill (needs VOYAGE_API_KEY)
+  retag_cards.py                    re-run Claude tagging across the corpus (needs ANTHROPIC_API_KEY)
 tests/                              pytest suite (export round-trip + markup ops)
 ```
 

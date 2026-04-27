@@ -24,13 +24,13 @@ Highlights are round-specific — the 1AC read is long, the 2AC extension is six
 
 `tsvector` handles known-author / known-phrase lookups but fails on argument-shaped queries ("heg resilient", "circumvention answers"). Embeddings unlock the queries debaters actually have.
 
-**Status:** PR 6a + 6b shipped; PR 6c (Claude-assisted tagging) still to come.
+**Status:** PR 6a + 6b + 6c shipped — feature #3 is complete.
 
 - ✅ pgvector column on `cards` (vector(512), HNSW index over cosine distance). Voyage `voyage-3-lite` provider (`src/debatabase/embeddings.py`).
 - ✅ Backfill script (`scripts/backfill_embeddings.py`), idempotent, batched.
 - ✅ Hybrid search in `/search`: when `VOYAGE_API_KEY` is set, blend `tsvector` rank with cosine similarity. Cards without embeddings still match via keyword. Small "semantic" badge in the UI when active.
 - ✅ "Find evidence that answers this card →" button on card detail. Claude Haiku generates the inverse claim of the card's tag, embeds it, vector-searches the corpus, returns the top 8 closest cards (`src/debatabase/answer_finder.py`). Requires both `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY`; the button is hidden otherwise.
-- ⏳ Replace the keyword `KEYWORD_RULES` tagger in `bulk.py` with Claude-assisted tagging on ingest, constrained to the existing `content_tags` vocabulary.
+- ✅ Claude-assisted tagging (`src/debatabase/tagger.py`). On `bulk.py` ingest, when `ANTHROPIC_API_KEY` is set, each card's tag + body are sent to Haiku with the controlled vocabulary; output is constrained to existing slugs and lands in `card_content_tags` with `status='proposed'` (admin promotes to 'approved' later — currently via SQL, no admin UI yet). Falls back to legacy `KEYWORD_RULES` when no key. Retroactive script `scripts/retag_cards.py` runs the same flow over the existing corpus.
 
 ## 4. Duplicate / near-duplicate clustering
 

@@ -29,7 +29,9 @@ from debatabase.ingest import (
     insert_analytical,
     insert_card,
 )
+from debatabase.models import ContentTag
 from debatabase.parser.extract import extract_docx, to_jsonl
+from debatabase.tagger import VocabEntry, has_tagging_capability, propose_tags
 
 # ----- markup span computation ---------------------------------------------
 
@@ -399,6 +401,21 @@ def ingest_docx(
     new_tag_slugs: set[str] = set()
     errors: list[str] = []
 
+    # Claude tagging is preferred when ANTHROPIC_API_KEY is set; falls
+    # back to the legacy KEYWORD_RULES otherwise. Vocabulary is loaded
+    # once per doc — the controlled vocabulary changes rarely enough
+    # that a per-card refresh isn't worth the round-trips.
+    use_claude = has_tagging_capability()
+    vocab: list[VocabEntry] = []
+    if use_claude:
+        rows = session.execute(
+            ContentTag.__table__.select()
+        ).all()
+        vocab = [
+            VocabEntry(slug=r.slug, label=r.label, description=r.description)
+            for r in rows
+        ]
+
     for it in items:
         try:
             tag_text, tag_raw = spans_from_runs(paragraphs[it.tag_idx]["runs"])
@@ -407,7 +424,27 @@ def ingest_docx(
             for h in (it.h2, it.h3):
                 if h: block_path.append(h)
 
-            inferred = infer_tags(tag_text, it.h1, it.h2, it.h3, filename=source_file)
+            if use_claude:
+                # Claude needs the body too; for analyticals we only have
+                # the tag itself, which is the argument.
+                if it.kind == "analytical":
+                    body_for_tagger = ""
+                else:
+                    # Pre-extract body text just for the tagger; the
+                    # canonical insert path below re-extracts with markup.
+                    body_for_tagger, _ = build_body(
+                        paragraphs, range(it.body_start, it.body_end + 1)
+                    )
+                slugs = propose_tags(tag_text, body_for_tagger, vocab)
+                # Hydrate to the (slug, label) tuples the insert helpers want.
+                slug_to_label = {v.slug: v.label for v in vocab}
+                inferred = [(s, slug_to_label[s]) for s in slugs]
+                tag_status = "proposed"
+            else:
+                inferred = infer_tags(
+                    tag_text, it.h1, it.h2, it.h3, filename=source_file
+                )
+                tag_status = "approved"
 
             if it.kind == "analytical":
                 a = insert_analytical(
@@ -420,6 +457,7 @@ def ingest_docx(
                         block_path=block_path,
                     ),
                     approved_tag_slugs=inferred,
+                    status=tag_status,
                 )
                 analyticals_added += 1
             else:
@@ -437,7 +475,7 @@ def ingest_docx(
                     card_text=body_text, markup=body_markup,
                     source_file=source_file, block_path=block_path,
                 )
-                insert_card(session, src, card, inferred)
+                insert_card(session, src, card, inferred, status=tag_status)
                 cards_added += 1
             for slug, _ in inferred:
                 new_tag_slugs.add(slug)

@@ -83,7 +83,9 @@ class CardContentTag(Base):
     status: Mapped[str] = mapped_column(
         Enum("proposed", "approved", name="content_tag_status"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     card: Mapped[Card] = relationship(back_populates="content_tag_links")
     content_tag: Mapped[ContentTag] = relationship()
@@ -117,7 +119,9 @@ class AnalyticalContentTag(Base):
     status: Mapped[str] = mapped_column(
         Enum("proposed", "approved", name="content_tag_status"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     analytical: Mapped[Analytical] = relationship(back_populates="content_tag_links")
     content_tag: Mapped[ContentTag] = relationship()

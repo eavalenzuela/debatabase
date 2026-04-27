@@ -97,7 +97,17 @@ def insert_card(
     source: Source,
     card: CardData,
     approved_tag_slugs: list[tuple[str, str]],  # [(slug, label), ...]
+    *,
+    status: str = "approved",
 ) -> Card:
+    """Insert a card and its tag links.
+
+    ``status`` controls ``card_content_tags.status`` for the inserted
+    rows. Pre-#3 (KEYWORD_RULES) tags came in "approved" because the
+    rules were hand-vetted; Claude-proposed tags from ``tagger.py``
+    use "proposed" so an admin can promote them. Enforced by the
+    ``content_tag_status`` enum.
+    """
     c = Card(
         source_id=source.id,
         tag=card.tag,
@@ -116,7 +126,7 @@ def insert_card(
             CardContentTag(
                 card_id=c.id,
                 content_tag_id=ct.id,
-                status="approved",
+                status=status,
                 created_at=datetime.now(UTC),
             )
         )
@@ -127,6 +137,8 @@ def insert_analytical(
     session: Session,
     data: AnalyticalData,
     approved_tag_slugs: list[tuple[str, str]],
+    *,
+    status: str = "approved",
 ) -> Analytical:
     a = Analytical(
         argument=data.argument,
@@ -144,7 +156,7 @@ def insert_analytical(
             AnalyticalContentTag(
                 analytical_id=a.id,
                 content_tag_id=ct.id,
-                status="approved",
+                status=status,
                 created_at=datetime.now(UTC),
             )
         )
