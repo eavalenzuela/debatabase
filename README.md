@@ -20,7 +20,7 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - **Proposed-tag review** — `/admin/proposed-tags` (login-gated) groups every proposed link by tag with one-click approve / reject.
   - **Duplicate detection** — `/admin/duplicates` (login-gated) clusters near-duplicate cards by embedding cosine distance and lets you pick a canonical per cluster; non-canonicals get hidden from search and from "answers this card" results.
   - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
-- **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,996 cards, 88 analyticals, 2,139 sources, 86 content tags, drawn from ~75 source documents).
+- **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,992 canonical + 360 hidden duplicate cards, 88 analyticals, 2,138 sources, 86 content tags, drawn from ~75 source documents). Includes pre-computed Voyage embeddings so `/search` semantic ranking and `/cards/{id}/answers` work immediately on a fresh install — no backfill required.
 
 ## Domain glossary
 
