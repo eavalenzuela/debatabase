@@ -110,21 +110,34 @@ CREATE INDEX analytical_content_tags_tag_idx ON analytical_content_tags (content
 -- Users. IRC-style: nickname + password, no email. pw_hash is nullable so
 -- the bootstrap "local" user (single-user mode, pre-auth) has no password
 -- yet. Real registration / login flow lands with FEATURE_ADDITIONS.md #6.
+-- current_workspace_id points at the workspace the user is currently
+-- editing; nullable because workspaces are created after the user, and
+-- because a deleted-last-workspace race could briefly orphan it.
 CREATE TABLE users (
-    id              BIGSERIAL PRIMARY KEY,
-    nickname        CITEXT NOT NULL UNIQUE,
-    pw_hash         TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                    BIGSERIAL PRIMARY KEY,
+    nickname              CITEXT NOT NULL UNIQUE,
+    pw_hash               TEXT,
+    current_workspace_id  BIGINT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Workspace: each user has exactly one current speech-doc workspace.
--- Enforced by UNIQUE(user_id). Multi-doc / saved-history is a future
--- migration, not v1.
+-- Workspaces: a user can have many named speech-doc workspaces. The
+-- "current" one (the workspace that "+ Add to workspace" buttons target,
+-- and the one /workspace redirects to) is tracked on users.
 CREATE TABLE workspaces (
     id              BIGSERIAL PRIMARY KEY,
-    user_id         BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX workspaces_user_id_idx ON workspaces (user_id);
+
+-- Deferred FK so users.current_workspace_id can reference a row that
+-- doesn't exist yet at user-creation time.
+ALTER TABLE users
+    ADD CONSTRAINT users_current_workspace_fk
+    FOREIGN KEY (current_workspace_id) REFERENCES workspaces(id)
+    ON DELETE SET NULL;
 
 -- One row per card or analytical added to a workspace, ordered by
 -- `position` and grouped under a per-entry `header_path` (mirrors
@@ -144,9 +157,12 @@ CREATE TABLE workspace_entries (
 );
 CREATE INDEX workspace_entries_workspace_idx ON workspace_entries (workspace_id, position);
 
--- Bootstrap: a single placeholder user so v1 routes can resolve a
--- "current user" without auth. Auth (FEATURE_ADDITIONS.md #6) replaces
--- this with real registration; the row stays valid through that change.
+-- Bootstrap: a single placeholder user + their default workspace so v1
+-- routes can resolve a "current user" without auth. Auth
+-- (FEATURE_ADDITIONS.md #6) replaces the placeholder user with real
+-- registration; rows stay valid through that change.
 INSERT INTO users (id, nickname) VALUES (1, 'local');
 SELECT setval(pg_get_serial_sequence('users', 'id'), 1, true);
-INSERT INTO workspaces (user_id) VALUES (1);
+INSERT INTO workspaces (id, user_id, name) VALUES (1, 1, 'My Workspace');
+SELECT setval(pg_get_serial_sequence('workspaces', 'id'), 1, true);
+UPDATE users SET current_workspace_id = 1 WHERE id = 1;

@@ -452,3 +452,164 @@ input[type=search] {
   font-size: 0.85rem;
   cursor: pointer;
 }
+
+/* Workspaces list page */
+.workspaces-index h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+.ws-create {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.ws-create input[type=text] {
+  flex: 1;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.ws-create button {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.ws-list { list-style: none; padding: 0; margin: 0; }
+.ws-list-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+.ws-list-row.current {
+  background: var(--accent-soft);
+  border-radius: 4px;
+}
+.ws-list-name a {
+  font-weight: 600;
+  color: var(--fg);
+  text-decoration: none;
+}
+.ws-list-name a:hover { color: var(--accent); }
+.ws-list-meta { color: var(--muted); font-size: 0.85rem; }
+.ws-list-actions { display: flex; gap: 0.4rem; }
+.ws-list-actions button {
+  background: white;
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--muted);
+}
+.ws-list-actions button:hover { background: var(--chip-bg); color: var(--fg); }
+.ws-list-actions button.danger { color: #b71c1c; border-color: #f8c7c7; }
+.ws-list-actions button.danger:hover { background: #fdecec; }
+
+/* Workspace toolbar additions */
+.ws-name-block {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+}
+.workspace .ws-name-display {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+.ws-rename {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.ws-rename input[type=text] {
+  font-size: 1.2rem;
+  font-weight: 700;
+  border: 1px dashed var(--accent);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: white;
+}
+.ws-rename-toggle {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.ws-rename-toggle:hover { color: var(--accent); }
+.ws-current-badge {
+  background: var(--accent);
+  color: white;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+}
+.ws-switch {
+  background: white;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.ws-switch:hover { background: var(--accent-soft); }
+.ws-list-link {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-decoration: none;
+  margin-left: auto;
+}
+.ws-list-link:hover { color: var(--accent); }
+.ws-clear {
+  background: white;
+  border: 1px solid #f8c7c7;
+  color: #b71c1c;
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.ws-clear:hover:not(:disabled) { background: #fdecec; }
+.ws-clear:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Drag handle and ghost */
+.ws-drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 1.1rem;
+  user-select: none;
+  padding: 0.3rem 0.4rem;
+  align-self: flex-start;
+}
+.ws-drag-handle:hover { color: var(--accent); }
+.ws-drag-handle:active { cursor: grabbing; }
+.ws-drag-ghost {
+  opacity: 0.4;
+  background: var(--accent-soft);
+}
+
+/* Card body preview in workspace */
+.ws-card-body {
+  margin-top: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  line-height: 1.5;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+.ws-no-highlight {
+  font-style: italic;
+  color: var(--muted);
+}

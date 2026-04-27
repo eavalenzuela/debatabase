@@ -42,7 +42,7 @@
   </div>
 
   <form class="ws-add"
-        hx-post="/workspace/entries"
+        hx-post="/workspaces/{{ current_workspace_id }}/entries"
         hx-target="#ws-feedback-{{ card.id }}"
         hx-swap="innerHTML">
     <input type="hidden" name="card_id" value="{{ card.id }}">

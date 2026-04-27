@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import re
+
 from fastapi import Depends, FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select, text as sqltext
@@ -34,6 +36,7 @@ from debatabase.models import (
     CardContentTag,
     ContentTag,
     Source,
+    User,
     Workspace,
     WorkspaceEntry,
 )
@@ -202,6 +205,13 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
         # Tag tree for sidebar
         tag_tree = _tag_tree(s)
 
+        # Current workspace id for "+ Add to workspace" buttons
+        current_user = _get_user(s, get_current_user_id())
+        current_workspace_id = current_user.current_workspace_id
+        if current_workspace_id is None:
+            ws_obj = _ensure_current_workspace(s, current_user.id)
+            current_workspace_id = ws_obj.id
+
     # Pagination math
     total_pages = max(1, (total_cards_matching + PAGE_SIZE - 1) // PAGE_SIZE)
     start_idx = offset + 1 if cards else 0
@@ -228,6 +238,7 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
             "start_idx": start_idx,
             "end_idx": end_idx,
             "page_size": PAGE_SIZE,
+            "current_workspace_id": current_workspace_id,
         },
     )
 
@@ -251,6 +262,11 @@ def card_detail(
             .join(CardContentTag, CardContentTag.content_tag_id == ContentTag.id)
             .where(CardContentTag.card_id == card_id)
         ).all()
+        current_user = _get_user(s, get_current_user_id())
+        current_workspace_id = current_user.current_workspace_id
+        if current_workspace_id is None:
+            ws_obj = _ensure_current_workspace(s, current_user.id)
+            current_workspace_id = ws_obj.id
 
     has_highlight = any(s["kind"] == "highlight" for s in (card.markup or []))
     has_underline = any(s["kind"] == "underline" for s in (card.markup or []))
@@ -264,6 +280,7 @@ def card_detail(
             "mode": mode,
             "has_highlight": has_highlight,
             "has_underline": has_underline,
+            "current_workspace_id": current_workspace_id,
         },
     )
 
@@ -325,23 +342,51 @@ def analyticals_index(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Workspace
+# Workspaces
 #
-# Each user has exactly one current workspace (UNIQUE on workspaces.user_id).
-# v1 hardcodes user_id=1 (the bootstrap "local" user); FEATURE_ADDITIONS.md #6
-# replaces get_current_user_id() with a real session lookup.
+# A user can have many named workspaces; one is "current" (where
+# "+ Add to workspace" buttons send adds, and where /workspace
+# redirects). v1 hardcodes user_id=1 (the bootstrap "local" user);
+# FEATURE_ADDITIONS.md #6 replaces get_current_user_id() with a real
+# session lookup.
 # ---------------------------------------------------------------------------
 
 def get_current_user_id() -> int:
     return 1
 
 
-def _get_workspace(s: Session, user_id: int) -> Workspace:
-    ws = s.scalar(select(Workspace).where(Workspace.user_id == user_id))
+def _get_user(s: Session, user_id: int) -> User:
+    user = s.get(User, user_id)
+    if user is None:
+        raise RuntimeError(f"user {user_id} not found")
+    return user
+
+
+def _ensure_current_workspace(s: Session, user_id: int) -> Workspace:
+    """Return the user's current workspace, creating one if they have none."""
+    user = _get_user(s, user_id)
+    if user.current_workspace_id is not None:
+        ws = s.get(Workspace, user.current_workspace_id)
+        if ws is not None and ws.user_id == user_id:
+            return ws
+    # Either current is unset or stale; pick any workspace, or make one.
+    ws = s.scalar(
+        select(Workspace).where(Workspace.user_id == user_id).order_by(Workspace.id)
+    )
     if ws is None:
-        ws = Workspace(user_id=user_id)
+        ws = Workspace(user_id=user_id, name="My Workspace")
         s.add(ws)
         s.flush()
+    user.current_workspace_id = ws.id
+    return ws
+
+
+def _get_workspace_or_404(
+    s: Session, ws_id: int, user_id: int
+) -> Workspace | None:
+    ws = s.get(Workspace, ws_id)
+    if ws is None or ws.user_id != user_id:
+        return None
     return ws
 
 
@@ -391,37 +436,190 @@ def _group_entries(
     return groups
 
 
-def _entries_fragment(request: Request, user_id: int) -> HTMLResponse:
+def _entries_fragment(request: Request, ws: Workspace) -> HTMLResponse:
     with session_scope() as s:
-        ws = _get_workspace(s, user_id)
         entries = _load_entries(s, ws.id)
     return templates.TemplateResponse(
         request,
         "_workspace_entries.html",
-        {"groups": _group_entries(entries), "n_entries": len(entries)},
-    )
-
-
-@app.get("/workspace", response_class=HTMLResponse)
-def workspace_view(
-    request: Request, user_id: int = Depends(get_current_user_id)
-):
-    with session_scope() as s:
-        ws = _get_workspace(s, user_id)
-        entries = _load_entries(s, ws.id)
-    return templates.TemplateResponse(
-        request,
-        "workspace.html",
         {
+            "ws": ws,
             "groups": _group_entries(entries),
             "n_entries": len(entries),
         },
     )
 
 
-@app.post("/workspace/entries", response_class=HTMLResponse)
+def _reorder_to_position(
+    s: Session, ws_id: int, entry: WorkspaceEntry, new_position: int
+) -> None:
+    """Move `entry` to absolute 1-indexed `new_position`, renumbering others.
+
+    Uses a two-pass flush (negative sentinel slots, then flip back to
+    positive) to avoid violating UNIQUE(workspace_id, position) mid-update.
+    """
+    entries = list(
+        s.execute(
+            select(WorkspaceEntry)
+            .where(WorkspaceEntry.workspace_id == ws_id)
+            .order_by(WorkspaceEntry.position)
+        ).scalars().all()
+    )
+    others = [e for e in entries if e.id != entry.id]
+    new_idx = max(0, min(new_position - 1, len(others)))
+    new_order = others[:new_idx] + [entry] + others[new_idx:]
+
+    for i, e in enumerate(new_order, start=1):
+        e.position = -i
+    s.flush()
+    for e in new_order:
+        e.position = -e.position
+    s.flush()
+
+
+_SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _filename_for(name: str) -> str:
+    safe = _SAFE_FILENAME.sub("_", name).strip("_") or "workspace"
+    return f"{safe}.docx"
+
+
+# ---- list / create / view / rename / delete / select --------------------
+
+@app.get("/workspaces", response_class=HTMLResponse)
+def workspaces_index(
+    request: Request, user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        user = _get_user(s, user_id)
+        all_ws = s.execute(
+            select(
+                Workspace,
+                func.count(WorkspaceEntry.id).label("n_entries"),
+            )
+            .outerjoin(
+                WorkspaceEntry, WorkspaceEntry.workspace_id == Workspace.id
+            )
+            .where(Workspace.user_id == user_id)
+            .group_by(Workspace.id)
+            .order_by(Workspace.id)
+        ).all()
+        rows = [(ws, n) for ws, n in all_ws]
+        current_id = user.current_workspace_id
+    return templates.TemplateResponse(
+        request,
+        "workspaces_index.html",
+        {"rows": rows, "current_workspace_id": current_id},
+    )
+
+
+@app.post("/workspaces", response_class=HTMLResponse)
+def create_workspace(
+    name: str = Form(...), user_id: int = Depends(get_current_user_id)
+):
+    name = name.strip() or "Untitled"
+    with session_scope() as s:
+        user = _get_user(s, user_id)
+        ws = Workspace(user_id=user_id, name=name)
+        s.add(ws)
+        s.flush()
+        user.current_workspace_id = ws.id
+        ws_id = ws.id
+    return RedirectResponse(f"/workspaces/{ws_id}", status_code=303)
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+def workspace_redirect(user_id: int = Depends(get_current_user_id)):
+    with session_scope() as s:
+        ws = _ensure_current_workspace(s, user_id)
+        ws_id = ws.id
+    return RedirectResponse(f"/workspaces/{ws_id}", status_code=303)
+
+
+@app.get("/workspaces/{ws_id}", response_class=HTMLResponse)
+def workspace_view(
+    request: Request,
+    ws_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse(f"workspace {ws_id} not found", status_code=404)
+        user = _get_user(s, user_id)
+        entries = _load_entries(s, ws.id)
+        is_current = user.current_workspace_id == ws.id
+    return templates.TemplateResponse(
+        request,
+        "workspace.html",
+        {
+            "ws": ws,
+            "groups": _group_entries(entries),
+            "n_entries": len(entries),
+            "is_current": is_current,
+        },
+    )
+
+
+@app.patch("/workspaces/{ws_id}", response_class=HTMLResponse)
+def rename_workspace(
+    ws_id: int,
+    name: str = Form(...),
+    user_id: int = Depends(get_current_user_id),
+):
+    name = name.strip() or "Untitled"
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("not found", status_code=404)
+        ws.name = name
+    return HTMLResponse(name)
+
+
+@app.delete("/workspaces/{ws_id}", response_class=HTMLResponse)
+def delete_workspace(
+    ws_id: int, user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("not found", status_code=404)
+        user = _get_user(s, user_id)
+        s.delete(ws)
+        s.flush()
+        # Always leave the user with at least one workspace.
+        remaining = s.scalar(
+            select(Workspace).where(Workspace.user_id == user_id).order_by(Workspace.id)
+        )
+        if remaining is None:
+            remaining = Workspace(user_id=user_id, name="My Workspace")
+            s.add(remaining)
+            s.flush()
+        if user.current_workspace_id == ws_id or user.current_workspace_id is None:
+            user.current_workspace_id = remaining.id
+    return RedirectResponse("/workspaces", status_code=303)
+
+
+@app.post("/workspaces/{ws_id}/select", response_class=HTMLResponse)
+def select_workspace(
+    ws_id: int, user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("not found", status_code=404)
+        user = _get_user(s, user_id)
+        user.current_workspace_id = ws.id
+    return RedirectResponse(f"/workspaces/{ws_id}", status_code=303)
+
+
+# ---- entries ----------------------------------------------------------
+
+@app.post("/workspaces/{ws_id}/entries", response_class=HTMLResponse)
 def add_workspace_entry(
     request: Request,
+    ws_id: int,
     card_id: int | None = Form(default=None),
     analytical_id: int | None = Form(default=None),
     header_path: str | None = Form(default=None),
@@ -433,7 +631,9 @@ def add_workspace_entry(
             status_code=400,
         )
     with session_scope() as s:
-        ws = _get_workspace(s, user_id)
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
         entry = WorkspaceEntry(
             workspace_id=ws.id,
             position=_next_position(s, ws.id),
@@ -442,86 +642,99 @@ def add_workspace_entry(
             analytical_id=analytical_id,
         )
         s.add(entry)
-    # HTMX feedback: small confirmation. Caller decides where to swap it in.
+        ws_name = ws.name
     return HTMLResponse(
-        '<span class="ws-added">added · '
-        '<a href="/workspace">view workspace</a></span>'
+        f'<span class="ws-added">added to <em>{ws_name}</em> · '
+        f'<a href="/workspaces/{ws_id}">view</a></span>'
     )
 
 
-@app.delete("/workspace/entries/{entry_id}", response_class=HTMLResponse)
+@app.delete(
+    "/workspaces/{ws_id}/entries/{entry_id}", response_class=HTMLResponse
+)
 def delete_workspace_entry(
     request: Request,
+    ws_id: int,
     entry_id: int,
     user_id: int = Depends(get_current_user_id),
 ):
     with session_scope() as s:
-        ws = _get_workspace(s, user_id)
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
         entry = s.get(WorkspaceEntry, entry_id)
         if entry is None or entry.workspace_id != ws.id:
-            return HTMLResponse("not found", status_code=404)
+            return HTMLResponse("entry not found", status_code=404)
         s.delete(entry)
-    return _entries_fragment(request, user_id)
+    with session_scope() as s:
+        ws = s.get(Workspace, ws_id)
+        return _entries_fragment(request, ws)
 
 
-@app.patch("/workspace/entries/{entry_id}", response_class=HTMLResponse)
+@app.patch(
+    "/workspaces/{ws_id}/entries/{entry_id}", response_class=HTMLResponse
+)
 def patch_workspace_entry(
     request: Request,
+    ws_id: int,
     entry_id: int,
     direction: str | None = Form(default=None),
+    position: int | None = Form(default=None),
     header_path: str | None = Form(default=None),
     user_id: int = Depends(get_current_user_id),
 ):
     with session_scope() as s:
-        ws = _get_workspace(s, user_id)
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
         entry = s.get(WorkspaceEntry, entry_id)
         if entry is None or entry.workspace_id != ws.id:
-            return HTMLResponse("not found", status_code=404)
+            return HTMLResponse("entry not found", status_code=404)
 
-        if direction in ("up", "down"):
-            if direction == "up":
-                neighbor_q = (
-                    select(WorkspaceEntry)
-                    .where(
-                        WorkspaceEntry.workspace_id == ws.id,
-                        WorkspaceEntry.position < entry.position,
-                    )
-                    .order_by(WorkspaceEntry.position.desc())
-                    .limit(1)
-                )
-            else:
-                neighbor_q = (
-                    select(WorkspaceEntry)
-                    .where(
-                        WorkspaceEntry.workspace_id == ws.id,
-                        WorkspaceEntry.position > entry.position,
-                    )
-                    .order_by(WorkspaceEntry.position.asc())
-                    .limit(1)
-                )
-            neighbor = s.scalar(neighbor_q)
-            if neighbor is not None:
-                # UNIQUE(workspace_id, position) requires a sentinel detour.
-                # Use a guaranteed-unused negative slot during the swap.
-                a, b = entry.position, neighbor.position
-                entry.position = -abs(a) - 1
-                s.flush()
-                neighbor.position = a
-                s.flush()
-                entry.position = b
-                s.flush()
+        if position is not None:
+            _reorder_to_position(s, ws.id, entry, position)
+        elif direction in ("up", "down"):
+            cur = entry.position
+            target = cur - 1 if direction == "up" else cur + 1
+            _reorder_to_position(s, ws.id, entry, target)
 
         if header_path is not None:
             entry.header_path = _parse_header_path(header_path) or None
 
-    return _entries_fragment(request, user_id)
-
-
-@app.get("/workspace/export.docx")
-def export_workspace_docx(user_id: int = Depends(get_current_user_id)):
     with session_scope() as s:
-        ws = _get_workspace(s, user_id)
+        ws = s.get(Workspace, ws_id)
+        return _entries_fragment(request, ws)
+
+
+@app.post("/workspaces/{ws_id}/clear", response_class=HTMLResponse)
+def clear_workspace(
+    request: Request,
+    ws_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
+        s.execute(
+            sqltext("DELETE FROM workspace_entries WHERE workspace_id = :wid"),
+            {"wid": ws.id},
+        )
+    with session_scope() as s:
+        ws = s.get(Workspace, ws_id)
+        return _entries_fragment(request, ws)
+
+
+@app.get("/workspaces/{ws_id}/export.docx")
+def export_workspace_docx(
+    ws_id: int, user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
         entries = _load_entries(s, ws.id)
+        ws_name = ws.name
 
         export_entries: list[ExportEntry] = []
         for e in entries:
@@ -552,12 +765,14 @@ def export_workspace_docx(user_id: int = Depends(get_current_user_id)):
                     )
                 )
 
-    blob = render_workspace_to_docx("workspace", export_entries)
+    blob = render_workspace_to_docx(ws_name, export_entries)
     return Response(
         content=blob,
         media_type=(
             "application/vnd.openxmlformats-officedocument"
             ".wordprocessingml.document"
         ),
-        headers={"Content-Disposition": 'attachment; filename="workspace.docx"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{_filename_for(ws_name)}"'
+        },
     )

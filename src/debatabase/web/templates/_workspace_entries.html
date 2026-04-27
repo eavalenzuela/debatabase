@@ -11,19 +11,11 @@
       </div>
       <ul class="ws-entry-list">
         {% for e in entries %}
-          <li class="ws-entry">
+          <li class="ws-entry" data-entry-id="{{ e.id }}">
+            <div class="ws-drag-handle" title="drag to reorder">⋮⋮</div>
+
             <div class="ws-entry-controls">
-              <form hx-patch="/workspace/entries/{{ e.id }}"
-                    hx-target="#ws-entries" hx-swap="innerHTML">
-                <input type="hidden" name="direction" value="up">
-                <button type="submit" title="move up">↑</button>
-              </form>
-              <form hx-patch="/workspace/entries/{{ e.id }}"
-                    hx-target="#ws-entries" hx-swap="innerHTML">
-                <input type="hidden" name="direction" value="down">
-                <button type="submit" title="move down">↓</button>
-              </form>
-              <form hx-delete="/workspace/entries/{{ e.id }}"
+              <form hx-delete="/workspaces/{{ ws.id }}/entries/{{ e.id }}"
                     hx-target="#ws-entries" hx-swap="innerHTML"
                     hx-confirm="Remove this entry from the workspace?">
                 <button type="submit" title="remove">×</button>
@@ -39,7 +31,14 @@
                 <div class="tag-text">
                   <a href="/cards/{{ e.card.id }}">{{ e.card.tag }}</a>
                 </div>
-                <div class="snippet">{{ snippet(e.card.card_text)|safe }}</div>
+                {% set hl_spans = (e.card.markup or [])|selectattr('kind','equalto','highlight')|list %}
+                <div class="ws-card-body card-body mode-highlight-only">
+                  {% if hl_spans %}
+                    {{ render_card(e.card.card_text, e.card.markup or [], 'highlight-only')|safe }}
+                  {% else %}
+                    <span class="ws-no-highlight">no highlight yet · </span>{{ snippet(e.card.card_text)|safe }}
+                  {% endif %}
+                </div>
               {% elif e.analytical is not none %}
                 <div class="cite">
                   analytical{% if e.analytical.answer_to %} · answers: <em>{{ e.analytical.answer_to }}</em>{% endif %}
@@ -49,7 +48,7 @@
 
               <details class="ws-edit-header">
                 <summary>edit header path</summary>
-                <form hx-patch="/workspace/entries/{{ e.id }}"
+                <form hx-patch="/workspaces/{{ ws.id }}/entries/{{ e.id }}"
                       hx-target="#ws-entries" hx-swap="innerHTML">
                   <input type="text" name="header_path"
                          value="{{ (e.header_path or [])|join(' > ') }}"

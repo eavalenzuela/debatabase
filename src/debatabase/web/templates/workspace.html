@@ -1,20 +1,89 @@
 {% extends "_base.html" %}
-{% block title %}Workspace · debatabase{% endblock %}
+{% block title %}{{ ws.name }} · debatabase{% endblock %}
 {% block content %}
 <section class="workspace">
   <div class="ws-toolbar">
-    <h1>Workspace</h1>
+    <div class="ws-name-block">
+      <form class="ws-rename"
+            hx-patch="/workspaces/{{ ws.id }}"
+            hx-target=".ws-name-display"
+            hx-swap="innerHTML">
+        <span class="ws-name-display">{{ ws.name }}</span>
+        <input type="text" name="name" value="{{ ws.name }}" hidden>
+        <button type="button" class="ws-rename-toggle" onclick="
+          const f=this.closest('form');
+          const d=f.querySelector('.ws-name-display');
+          const i=f.querySelector('input[name=name]');
+          if(i.hidden){i.hidden=false;d.hidden=true;i.focus();i.select();}
+          else{f.requestSubmit();}
+        ">edit</button>
+      </form>
+      {% if not is_current %}
+        <form method="post" action="/workspaces/{{ ws.id }}/select" style="display:inline">
+          <button type="submit" class="ws-switch">switch to this</button>
+        </form>
+      {% else %}
+        <span class="ws-current-badge">current</span>
+      {% endif %}
+      <a class="ws-list-link" href="/workspaces">all workspaces</a>
+    </div>
+
     <div class="ws-actions">
       <span class="ws-count">{{ n_entries }} {{ 'entry' if n_entries == 1 else 'entries' }}</span>
+      <form hx-post="/workspaces/{{ ws.id }}/clear"
+            hx-target="#ws-entries"
+            hx-swap="innerHTML"
+            hx-confirm="Remove all {{ n_entries }} entries from this workspace?"
+            style="display:inline">
+        <button type="submit" class="ws-clear" {% if n_entries == 0 %}disabled{% endif %}>clear</button>
+      </form>
       <a class="ws-export {% if n_entries == 0 %}disabled{% endif %}"
-         href="{% if n_entries > 0 %}/workspace/export.docx{% else %}#{% endif %}">
+         href="{% if n_entries > 0 %}/workspaces/{{ ws.id }}/export.docx{% else %}#{% endif %}">
         Export .docx
       </a>
     </div>
   </div>
 
-  <div id="ws-entries">
+  <div id="ws-entries" data-workspace-id="{{ ws.id }}">
     {% include "_workspace_entries.html" %}
   </div>
 </section>
+
+<script>
+  // Re-bind sortable after every HTMX swap of the entries region.
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (e.target.id === 'ws-entries') initWorkspaceSortable();
+  });
+  document.addEventListener('DOMContentLoaded', initWorkspaceSortable);
+
+  function initWorkspaceSortable() {
+    const wsId = document.getElementById('ws-entries').dataset.workspaceId;
+    document.querySelectorAll('.ws-entry-list').forEach((list) => {
+      if (list._sortable) list._sortable.destroy();
+      list._sortable = Sortable.create(list, {
+        group: 'workspace-entries',
+        animation: 150,
+        handle: '.ws-drag-handle',
+        ghostClass: 'ws-drag-ghost',
+        onEnd: async (evt) => {
+          if (evt.oldIndex === evt.newIndex && evt.from === evt.to) return;
+          const id = evt.item.dataset.entryId;
+          // Compute absolute position by counting all ws-entry items in DOM order.
+          const all = Array.from(document.querySelectorAll('.ws-entry'));
+          const pos = all.findIndex((el) => el.dataset.entryId === id) + 1;
+          const fd = new FormData();
+          fd.append('position', pos);
+          const r = await fetch(`/workspaces/${wsId}/entries/${id}`, {
+            method: 'PATCH', body: fd,
+          });
+          if (r.ok) {
+            const html = await r.text();
+            document.getElementById('ws-entries').innerHTML = html;
+            initWorkspaceSortable();
+          }
+        },
+      });
+    });
+  }
+</script>
 {% endblock %}

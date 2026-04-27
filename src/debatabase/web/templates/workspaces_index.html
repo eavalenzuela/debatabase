@@ -1,0 +1,44 @@
+{% extends "_base.html" %}
+{% block title %}Workspaces · debatabase{% endblock %}
+{% block content %}
+<section class="workspaces-index">
+  <h1>Workspaces</h1>
+
+  <form class="ws-create" method="post" action="/workspaces">
+    <input type="text" name="name" placeholder="New workspace name…" required>
+    <button type="submit">+ Create</button>
+  </form>
+
+  {% if rows %}
+    <ul class="ws-list">
+      {% for ws, n_entries in rows %}
+        <li class="ws-list-row {% if ws.id == current_workspace_id %}current{% endif %}">
+          <div class="ws-list-name">
+            <a href="/workspaces/{{ ws.id }}">{{ ws.name }}</a>
+            {% if ws.id == current_workspace_id %}
+              <span class="ws-current-badge">current</span>
+            {% endif %}
+          </div>
+          <div class="ws-list-meta">
+            {{ n_entries }} {{ 'entry' if n_entries == 1 else 'entries' }}
+          </div>
+          <div class="ws-list-actions">
+            {% if ws.id != current_workspace_id %}
+              <form method="post" action="/workspaces/{{ ws.id }}/select" style="display:inline">
+                <button type="submit">switch</button>
+              </form>
+            {% endif %}
+            <form hx-delete="/workspaces/{{ ws.id }}"
+                  hx-confirm="Delete workspace '{{ ws.name }}' and all its entries?"
+                  style="display:inline">
+              <button type="submit" class="danger">delete</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">No workspaces yet. Create one above.</p>
+  {% endif %}
+</section>
+{% endblock %}

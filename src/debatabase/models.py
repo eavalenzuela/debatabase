@@ -125,12 +125,20 @@ class User(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     nickname: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     pw_hash: Mapped[str | None] = mapped_column(Text)
+    current_workspace_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("workspaces.id", use_alter=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    workspace: Mapped["Workspace"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    workspaces: Mapped[list["Workspace"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="Workspace.user_id",
+    )
+    current_workspace: Mapped["Workspace | None"] = relationship(
+        foreign_keys=[current_workspace_id], post_update=True
     )
 
 
@@ -139,13 +147,16 @@ class Workspace(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id"), nullable=False, unique=True
+        BigInteger, ForeignKey("users.id"), nullable=False
     )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    user: Mapped[User] = relationship(back_populates="workspace")
+    user: Mapped[User] = relationship(
+        back_populates="workspaces", foreign_keys=[user_id]
+    )
     entries: Mapped[list["WorkspaceEntry"]] = relationship(
         back_populates="workspace",
         order_by="WorkspaceEntry.position",
