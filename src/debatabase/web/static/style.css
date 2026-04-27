@@ -613,3 +613,48 @@ input[type=search] {
   font-style: italic;
   color: var(--muted);
 }
+
+/* Markup editor tools */
+.ws-markup-tools {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+}
+.mu-btn {
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.mu-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.mu-highlight { background: var(--highlight-bg); }
+.mu-highlight:hover { background: #ffe066; }
+.mu-underline { text-decoration: underline; text-decoration-thickness: 1.5px; }
+.mu-clear { color: var(--muted); }
+.mu-revert {
+  background: white;
+  border: 1px solid #f8c7c7;
+  color: #b71c1c;
+}
+.mu-revert:hover { background: #fdecec; }
+.mu-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.ws-variant-badge {
+  background: var(--accent);
+  color: white;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}

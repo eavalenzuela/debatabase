@@ -30,10 +30,12 @@ from debatabase.docx_export import (
     ExportEntry,
     render_workspace_to_docx,
 )
+from debatabase.markup_ops import apply_op
 from debatabase.models import (
     Analytical,
     Card,
     CardContentTag,
+    CardVariant,
     ContentTag,
     Source,
     User,
@@ -417,10 +419,20 @@ def _load_entries(s: Session, workspace_id: int) -> list[WorkspaceEntry]:
             .options(
                 joinedload(WorkspaceEntry.card).joinedload(Card.source),
                 joinedload(WorkspaceEntry.analytical),
+                joinedload(WorkspaceEntry.card_variant),
             )
             .order_by(WorkspaceEntry.position)
         ).scalars().unique().all()
     )
+
+
+def _entry_markup(entry: WorkspaceEntry) -> list[dict]:
+    """Effective markup spans for a card entry: variant if set, else canonical."""
+    if entry.card_variant is not None:
+        return entry.card_variant.markup or []
+    if entry.card is not None:
+        return entry.card.markup or []
+    return []
 
 
 def _group_entries(
@@ -706,6 +718,110 @@ def patch_workspace_entry(
         return _entries_fragment(request, ws)
 
 
+@app.post(
+    "/workspaces/{ws_id}/entries/{entry_id}/variant",
+    response_class=HTMLResponse,
+)
+def apply_variant_op(
+    request: Request,
+    ws_id: int,
+    entry_id: int,
+    action: str = Form(...),
+    start: int = Form(...),
+    end: int = Form(...),
+    kind: str | None = Form(default=None),
+    user_id: int = Depends(get_current_user_id),
+):
+    """Apply a markup op to the card entry's variant.
+
+    Creates the variant on first edit (initialized from the canonical
+    card's markup), then mutates it in place. Variants are
+    workspace-scoped; the canonical cards row is never touched.
+    """
+    if action not in ("add", "clear"):
+        return HTMLResponse("invalid action", status_code=400)
+    if action == "add" and kind not in ("highlight", "underline"):
+        return HTMLResponse("kind required for add", status_code=400)
+    if start >= end:
+        return HTMLResponse("empty selection", status_code=400)
+
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
+        entry = s.get(WorkspaceEntry, entry_id)
+        if (
+            entry is None
+            or entry.workspace_id != ws.id
+            or entry.card_id is None
+        ):
+            return HTMLResponse(
+                "card entry not found in this workspace", status_code=404
+            )
+
+        card = s.get(Card, entry.card_id)
+        if card is None:
+            return HTMLResponse("card missing", status_code=500)
+        if not (0 <= start < end <= len(card.card_text)):
+            return HTMLResponse(
+                "selection out of bounds", status_code=400
+            )
+
+        if entry.card_variant_id is not None:
+            variant = s.get(CardVariant, entry.card_variant_id)
+        else:
+            variant = CardVariant(
+                workspace_id=ws.id,
+                card_id=card.id,
+                markup=list(card.markup or []),
+            )
+            s.add(variant)
+            s.flush()
+            entry.card_variant_id = variant.id
+
+        variant.markup = apply_op(
+            variant.markup or [],
+            action=action,
+            kind=kind,  # type: ignore[arg-type]
+            start=start,
+            end=end,
+        )
+        variant.updated_at = func.now()
+
+    with session_scope() as s:
+        ws = s.get(Workspace, ws_id)
+        return _entries_fragment(request, ws)
+
+
+@app.delete(
+    "/workspaces/{ws_id}/entries/{entry_id}/variant",
+    response_class=HTMLResponse,
+)
+def revert_variant(
+    request: Request,
+    ws_id: int,
+    entry_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Drop the variant and revert the entry to the canonical card markup."""
+    with session_scope() as s:
+        ws = _get_workspace_or_404(s, ws_id, user_id)
+        if ws is None:
+            return HTMLResponse("workspace not found", status_code=404)
+        entry = s.get(WorkspaceEntry, entry_id)
+        if entry is None or entry.workspace_id != ws.id:
+            return HTMLResponse("entry not found", status_code=404)
+        variant_id = entry.card_variant_id
+        entry.card_variant_id = None
+        if variant_id is not None:
+            variant = s.get(CardVariant, variant_id)
+            if variant is not None:
+                s.delete(variant)
+    with session_scope() as s:
+        ws = s.get(Workspace, ws_id)
+        return _entries_fragment(request, ws)
+
+
 @app.post("/workspaces/{ws_id}/clear", response_class=HTMLResponse)
 def clear_workspace(
     request: Request,
@@ -740,6 +856,13 @@ def export_workspace_docx(
         for e in entries:
             path = list(e.header_path or [])
             if e.card is not None:
+                # Prefer the workspace-scoped variant's markup when set;
+                # variants never touch the canonical card row.
+                effective_markup = (
+                    e.card_variant.markup
+                    if e.card_variant is not None
+                    else (e.card.markup or [])
+                )
                 export_entries.append(
                     ExportEntry(
                         header_path=path,
@@ -747,7 +870,7 @@ def export_workspace_docx(
                             tag=e.card.tag,
                             tag_markup=e.card.tag_markup or [],
                             card_text=e.card.card_text,
-                            markup=e.card.markup or [],
+                            markup=effective_markup or [],
                             cite_short=e.card.source.cite_short,
                             raw_cite=e.card.source.raw_cite,
                         ),

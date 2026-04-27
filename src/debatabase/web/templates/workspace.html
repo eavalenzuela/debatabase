@@ -56,6 +56,65 @@
   });
   document.addEventListener('DOMContentLoaded', initWorkspaceSortable);
 
+  // Markup editor: click highlight/underline/clear with text selected
+  // inside a .ws-card-body. Selection-to-offset walks text nodes to map
+  // the browser Range into character indices over the plain card_text.
+  document.body.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.mu-btn');
+    if (!btn || btn.type === 'submit') return;
+    const tools = btn.closest('.ws-markup-tools');
+    if (!tools) return;
+    const entry = btn.closest('.ws-entry');
+    const body = entry.querySelector('.ws-card-body');
+    const status = tools.querySelector('.mu-status');
+    const range = getCharRange(body);
+    if (!range) {
+      status.textContent = 'select some text first';
+      setTimeout(() => { if (status.textContent === 'select some text first') status.textContent = ''; }, 2000);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('action', btn.dataset.action);
+    if (btn.dataset.kind) fd.append('kind', btn.dataset.kind);
+    fd.append('start', range[0]);
+    fd.append('end', range[1]);
+    const url = `/workspaces/${tools.dataset.wsId}/entries/${tools.dataset.entryId}/variant`;
+    const r = await fetch(url, { method: 'POST', body: fd });
+    if (r.ok) {
+      const html = await r.text();
+      document.getElementById('ws-entries').innerHTML = html;
+      initWorkspaceSortable();
+    } else {
+      status.textContent = 'error: ' + r.status;
+    }
+  });
+
+  function getCharRange(rootEl) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const r = sel.getRangeAt(0);
+    if (!rootEl.contains(r.startContainer) || !rootEl.contains(r.endContainer)) return null;
+    const a = textOffset(rootEl, r.startContainer, r.startOffset);
+    const b = textOffset(rootEl, r.endContainer, r.endOffset);
+    if (a < 0 || b < 0 || a === b) return null;
+    return [Math.min(a, b), Math.max(a, b)];
+  }
+
+  function textOffset(rootEl, node, offset) {
+    // Build a range from the start of rootEl to (node, offset) and ask
+    // for its text length. The rendered HTML wraps segments in <u> /
+    // <mark> but never adds or removes characters, so this length
+    // equals the offset into the underlying card_text.
+    const r = document.createRange();
+    r.setStart(rootEl, 0);
+    try {
+      r.setEnd(node, offset);
+    } catch {
+      return -1;
+    }
+    return r.toString().length;
+  }
+
   function initWorkspaceSortable() {
     const wsId = document.getElementById('ws-entries').dataset.workspaceId;
     document.querySelectorAll('.ws-entry-list').forEach((list) => {

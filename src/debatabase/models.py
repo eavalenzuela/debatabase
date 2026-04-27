@@ -177,6 +177,9 @@ class WorkspaceEntry(Base):
     analytical_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("analyticals.id")
     )
+    card_variant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("card_variants.id")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -184,3 +187,33 @@ class WorkspaceEntry(Base):
     workspace: Mapped[Workspace] = relationship(back_populates="entries")
     card: Mapped[Card | None] = relationship()
     analytical: Mapped[Analytical | None] = relationship()
+    card_variant: Mapped["CardVariant | None"] = relationship(
+        foreign_keys=[card_variant_id]
+    )
+
+
+class CardVariant(Base):
+    """Per-workspace re-cut of a card's markup.
+
+    Lives only inside the owning workspace. Global card endpoints never
+    join this table. See FEATURE_ADDITIONS.md #2 for the scoping rule.
+    """
+
+    __tablename__ = "card_variants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("workspaces.id"), nullable=False
+    )
+    card_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("cards.id"), nullable=False
+    )
+    markup: Mapped[list[dict]] = mapped_column(JSONB, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    card: Mapped[Card] = relationship()

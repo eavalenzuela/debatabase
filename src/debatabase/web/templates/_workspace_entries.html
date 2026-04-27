@@ -11,6 +11,8 @@
       </div>
       <ul class="ws-entry-list">
         {% for e in entries %}
+          {% set has_variant = e.card_variant is not none %}
+          {% set effective_markup = (e.card_variant.markup if has_variant else (e.card.markup if e.card else None)) or [] %}
           <li class="ws-entry" data-entry-id="{{ e.id }}">
             <div class="ws-drag-handle" title="drag to reorder">⋮⋮</div>
 
@@ -27,17 +29,41 @@
                 <div class="cite">
                   <a href="/sources/{{ e.card.source_id }}">{{ e.card.source.cite_short }}</a>
                   {% if e.card.source.publication %} · {{ e.card.source.publication }}{% endif %}
+                  {% if has_variant %}
+                    <span class="ws-variant-badge" title="this workspace has a re-cut variant of this card">edited</span>
+                  {% endif %}
                 </div>
                 <div class="tag-text">
                   <a href="/cards/{{ e.card.id }}">{{ e.card.tag }}</a>
                 </div>
-                {% set hl_spans = (e.card.markup or [])|selectattr('kind','equalto','highlight')|list %}
-                <div class="ws-card-body card-body mode-highlight-only">
-                  {% if hl_spans %}
-                    {{ render_card(e.card.card_text, e.card.markup or [], 'highlight-only')|safe }}
-                  {% else %}
-                    <span class="ws-no-highlight">no highlight yet · </span>{{ snippet(e.card.card_text)|safe }}
+
+                <div class="ws-card-body card-body mode-full"
+                     data-card-text="{{ e.card.card_text }}">{{ render_card(e.card.card_text, effective_markup, 'full')|safe }}</div>
+
+                <div class="ws-markup-tools"
+                     data-ws-id="{{ ws.id }}"
+                     data-entry-id="{{ e.id }}">
+                  <button type="button"
+                          class="mu-btn mu-highlight"
+                          data-action="add" data-kind="highlight"
+                          title="highlight selected text">highlight</button>
+                  <button type="button"
+                          class="mu-btn mu-underline"
+                          data-action="add" data-kind="underline"
+                          title="underline selected text">underline</button>
+                  <button type="button"
+                          class="mu-btn mu-clear"
+                          data-action="clear"
+                          title="clear markup from selection">clear</button>
+                  {% if has_variant %}
+                    <form hx-delete="/workspaces/{{ ws.id }}/entries/{{ e.id }}/variant"
+                          hx-target="#ws-entries" hx-swap="innerHTML"
+                          hx-confirm="Discard your edits and revert to the canonical card?"
+                          style="display:inline">
+                      <button type="submit" class="mu-btn mu-revert">revert to canonical</button>
+                    </form>
                   {% endif %}
+                  <span class="mu-status"></span>
                 </div>
               {% elif e.analytical is not none %}
                 <div class="cite">

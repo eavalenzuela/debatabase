@@ -143,14 +143,35 @@ ALTER TABLE users
 -- `position` and grouped under a per-entry `header_path` (mirrors
 -- cards.block_path so the export can emit Heading 1/2/3 by diffing
 -- consecutive entries' paths).
-CREATE TABLE workspace_entries (
+-- Card variants: a per-workspace override of a canonical card's markup
+-- (highlight + underline spans). Created when a debater re-cuts a card
+-- for a specific round / extension / 2AC; never visible outside the
+-- owning workspace. Global /cards/{id} and search NEVER join this
+-- table — the canonical markup is the authoritative shared view, and
+-- variants are private to the cutter's workspace. (FEATURE_ADDITIONS.md
+-- #2 captures the scoping rule.)
+CREATE TABLE card_variants (
     id              BIGSERIAL PRIMARY KEY,
     workspace_id    BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    position        INTEGER NOT NULL,
-    header_path     TEXT[],
-    card_id         BIGINT REFERENCES cards(id) ON DELETE SET NULL,
-    analytical_id   BIGINT REFERENCES analyticals(id) ON DELETE SET NULL,
+    card_id         BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    markup          JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX card_variants_workspace_idx ON card_variants (workspace_id);
+CREATE INDEX card_variants_card_idx ON card_variants (card_id);
+
+CREATE TABLE workspace_entries (
+    id                BIGSERIAL PRIMARY KEY,
+    workspace_id      BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    position          INTEGER NOT NULL,
+    header_path       TEXT[],
+    card_id           BIGINT REFERENCES cards(id) ON DELETE SET NULL,
+    analytical_id     BIGINT REFERENCES analyticals(id) ON DELETE SET NULL,
+    -- When set, the export and the workspace UI use this variant's
+    -- markup instead of cards.markup. NULL means "use canonical."
+    card_variant_id   BIGINT REFERENCES card_variants(id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT workspace_entry_one_target
         CHECK ((card_id IS NULL) <> (analytical_id IS NULL)),
     UNIQUE (workspace_id, position)
