@@ -1,0 +1,27 @@
+{% extends "_base.html" %}
+{% block title %}{{ source.cite_short }} · debatabase{% endblock %}
+{% block content %}
+<article class="source-detail">
+  <h1>{{ source.cite_short }}</h1>
+  {% if source.author_full %}<p class="author"><strong>{{ source.author_full }}</strong></p>{% endif %}
+  {% if source.qualifications %}<p class="quals">{{ source.qualifications }}</p>{% endif %}
+  {% if source.title %}<p class="title">"{{ source.title }}"</p>{% endif %}
+  {% if source.publication %}<p class="pub">{{ source.publication }}{% if source.year %} · {{ source.year }}{% endif %}</p>{% endif %}
+  {% if source.url %}<p class="url"><a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url }}</a></p>{% endif %}
+
+  <details class="raw-cite">
+    <summary>raw cite</summary>
+    <pre>{{ source.raw_cite }}</pre>
+  </details>
+
+  <h2>Cards from this source ({{ cards|length }})</h2>
+  <ul class="card-list">
+    {% for c in cards %}
+      <li class="card-row">
+        <div class="bp">{{ (c.block_path or [])|join(' › ') }}</div>
+        <div class="tag-text"><a href="/cards/{{ c.id }}">{{ c.tag }}</a></div>
+      </li>
+    {% endfor %}
+  </ul>
+</article>
+{% endblock %}

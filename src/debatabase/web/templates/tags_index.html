@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+{% block title %}Tags · debatabase{% endblock %}
+{% block content %}
+<h1>Content tags ({{ tags|length }})</h1>
+<table class="tag-table">
+  <thead><tr><th>Tag</th><th>Slug</th><th>Cards</th><th>Analyticals</th></tr></thead>
+  <tbody>
+    {% for id, slug, label, parent_id, n_cards, n_analyticals in tags %}
+      <tr>
+        <td><a href="/search?tag={{ slug }}">{{ label }}</a>
+          {% if parent_id %}<small class="parent">↳ child of #{{ parent_id }}</small>{% endif %}
+        </td>
+        <td><code>{{ slug }}</code></td>
+        <td class="num">{{ n_cards }}</td>
+        <td class="num">{{ n_analyticals }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+
+# Local DB data volume
+.pgdata/
+
+# Source debate docs are not redistributed — only the parsed evidence.
+# Cards/sources/tags live in db_seed.sql; the .docx/.doc inputs stay local.
+Evidence/
+parsed_docs/
+extracted/
+example_card_01.txt
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store

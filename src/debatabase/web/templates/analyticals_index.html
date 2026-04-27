@@ -1,0 +1,15 @@
+{% extends "_base.html" %}
+{% block title %}Analyticals · debatabase{% endblock %}
+{% block content %}
+<h1>Analyticals ({{ analyticals|length }})</h1>
+<ul class="card-list">
+  {% for a in analyticals %}
+    <li class="card-row analytical">
+      <div class="cite">answers: <em>{{ a.answer_to or '?' }}</em>
+        {% if a.block_path %} · <span class="bp">{{ a.block_path|join(' › ') }}</span>{% endif %}
+      </div>
+      <div class="tag-text">{{ a.argument }}</div>
+    </li>
+  {% endfor %}
+</ul>
+{% endblock %}

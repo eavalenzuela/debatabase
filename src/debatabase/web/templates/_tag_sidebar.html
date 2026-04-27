@@ -1,0 +1,26 @@
+<h3>Tags</h3>
+<ul class="tag-tree">
+  {% for node in tag_tree %}
+    <li class="tag-node {% if node.children %}has-children{% endif %}">
+      {% if node.children %}
+        <details>
+          <summary>
+            <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}">{{ node.label }}</a>
+            <span class="usage">{{ node.n_cards + node.n_analyticals }}</span>
+          </summary>
+          <ul class="tag-children">
+            {% for child in node.children %}
+              <li>
+                <a class="tag-link {% if tag == child.slug %}active{% endif %}" href="/search?tag={{ child.slug }}{% if q %}&amp;q={{ q }}{% endif %}">{{ child.label }}</a>
+                <span class="usage">{{ child.n_cards + child.n_analyticals }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% else %}
+        <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}">{{ node.label }}</a>
+        <span class="usage">{{ node.n_cards + node.n_analyticals }}</span>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ul>

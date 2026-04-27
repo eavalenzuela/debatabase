@@ -1,0 +1,55 @@
+{% extends "_base.html" %}
+{% block title %}{{ card.tag[:60] }} · debatabase{% endblock %}
+{% block content %}
+<article class="card-detail">
+  <h1 class="tag">{{ card.tag }}</h1>
+
+  <div class="meta">
+    <a href="/sources/{{ card.source_id }}"><strong>{{ card.source.cite_short }}</strong></a>
+    {% if card.source.author_full %} — {{ card.source.author_full }}{% endif %}
+    {% if card.source.publication %} · {{ card.source.publication }}{% endif %}
+    {% if card.source.year %} · {{ card.source.year }}{% endif %}
+  </div>
+
+  {% if card.source.title %}
+    <div class="title">"{{ card.source.title }}"</div>
+  {% endif %}
+
+  {% if card.source.url %}
+    <div class="url"><a href="{{ card.source.url }}" target="_blank" rel="noopener">{{ card.source.url }}</a></div>
+  {% endif %}
+
+  {% if card.source.qualifications %}
+    <details class="quals">
+      <summary>qualifications</summary>
+      <p>{{ card.source.qualifications }}</p>
+    </details>
+  {% endif %}
+
+  <details class="raw-cite">
+    <summary>raw cite</summary>
+    <pre>{{ card.source.raw_cite }}</pre>
+  </details>
+
+  {% if card.block_path %}
+    <div class="bp">{{ card.block_path|join(' › ') }}</div>
+  {% endif %}
+
+  <div class="tag-chips">
+    {% for slug, label, status in tags %}
+      <a class="chip {% if status == 'proposed' %}proposed{% endif %}" href="/search?tag={{ slug }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <nav class="render-modes">
+    <a class="{% if mode == 'full' %}active{% endif %}" href="?mode=full">Full</a>
+    {% if has_underline %}<a class="{% if mode == 'underline-only' %}active{% endif %}" href="?mode=underline-only">Underlined only</a>{% endif %}
+    {% if has_highlight %}<a class="{% if mode == 'highlight-only' %}active{% endif %}" href="?mode=highlight-only">Highlighted only (in-round read)</a>{% endif %}
+    <a class="{% if mode == 'plain' %}active{% endif %}" href="?mode=plain">Plain</a>
+  </nav>
+
+  <div class="card-body mode-{{ mode }}">
+    {{ render_card(card.card_text, card.markup or [], mode)|safe }}
+  </div>
+</article>
+{% endblock %}

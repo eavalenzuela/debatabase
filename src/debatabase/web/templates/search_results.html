@@ -1,0 +1,68 @@
+{% if not cards and not analyticals %}
+  <p class="empty">No results.{% if q %} Try a different query, or browse <a href="/tags">tags</a>.{% endif %}</p>
+{% else %}
+  {% if analyticals %}
+    <h2 class="section-h">Analyticals ({{ analyticals|length }})</h2>
+    <ul class="card-list">
+      {% for a in analyticals %}
+        <li class="card-row analytical">
+          <div class="cite">analytical · answers: <em>{{ a.answer_to or '?' }}</em></div>
+          <div class="tag-text"><a href="/analyticals">{{ a.argument }}</a></div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <div class="results-meta">
+    <h2 class="section-h">
+      Cards
+      {% if total_cards_matching > 0 %}
+        — showing {{ start_idx }}–{{ end_idx }} of {{ total_cards_matching }}
+      {% endif %}
+    </h2>
+    {% if total_pages > 1 %}
+      <nav class="pagination">
+        {% if page > 1 %}
+          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page - 1 }}">‹ prev</a>
+        {% endif %}
+        <span>page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}
+          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page + 1 }}">next ›</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </div>
+
+  <ul class="card-list">
+    {% for c in cards %}
+      <li class="card-row">
+        <div class="cite">
+          <a href="/sources/{{ c.source_id }}">{{ c.source.cite_short }}</a>
+          {% if c.source.publication %} · {{ c.source.publication }}{% endif %}
+          {% if c.block_path %} · <span class="bp">{{ c.block_path|join(' › ') }}</span>{% endif %}
+        </div>
+        <div class="tag-text">
+          <a href="/cards/{{ c.id }}">{{ c.tag }}</a>
+        </div>
+        <div class="snippet">{{ snippet(c.card_text, q)|safe }}</div>
+        <div class="tag-chips">
+          {% for slug, label in tags_by_card.get(c.id, []) %}
+            <a class="chip" href="/search?tag={{ slug }}">{{ label }}</a>
+          {% endfor %}
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+
+  {% if total_pages > 1 %}
+    <nav class="pagination">
+      {% if page > 1 %}
+        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page - 1 }}">‹ prev</a>
+      {% endif %}
+      <span>page {{ page }} of {{ total_pages }}</span>
+      {% if page < total_pages %}
+        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page + 1 }}">next ›</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endif %}

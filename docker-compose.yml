@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: debatabase-postgres
+    environment:
+      POSTGRES_USER: debatabase
+      POSTGRES_PASSWORD: debatabase
+      POSTGRES_DB: debatabase
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./.pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debatabase"]
+      interval: 3s
+      timeout: 3s
+      retries: 10

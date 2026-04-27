@@ -1,0 +1,37 @@
+{% extends "_base.html" %}
+{% block title %}Search · debatabase{% endblock %}
+{% block content %}
+<div class="layout">
+  <section class="main-col">
+    <section class="search-header">
+      <p class="counts">
+        <strong>{{ n_cards }}</strong> cards · <strong>{{ n_anal }}</strong> analyticals ·
+        <strong>{{ n_sources }}</strong> sources · <strong>{{ n_tags }}</strong> tags
+      </p>
+      <form
+        hx-get="/search"
+        hx-target="#results"
+        hx-push-url="true"
+        hx-trigger="input changed delay:250ms from:input[name='q'], submit"
+      >
+        <input
+          type="search" name="q" placeholder="Search tag, body, author, cite…"
+          value="{{ q }}" autofocus autocomplete="off"
+        >
+        <input type="hidden" name="tag" value="{{ tag }}">
+        {% if tag %}
+          <span class="active-filter">tag: <code>{{ tag }}</code> <a href="/search?q={{ q }}">×</a></span>
+        {% endif %}
+      </form>
+    </section>
+
+    <div id="results">
+      {% include "search_results.html" %}
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    {% include "_tag_sidebar.html" %}
+  </aside>
+</div>
+{% endblock %}
