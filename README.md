@@ -83,6 +83,10 @@ The pipeline is deliberately conservative on tags — it sticks to the existing 
 
 The original `.docx` source files are **not** redistributed in this repository. The seed dump contains the parsed cards (verbatim quoted text + cite metadata + markup spans), which is what's useful to debaters; the source docs themselves stay local. If you maintain your own corpus, point the bulk ingest pipeline at it and re-export `db_seed.sql` if you want to share.
 
+## Screenshot
+
+![debatabase search UI showing 2,996 cards across the loaded corpus, with the hierarchical tag sidebar on the right](docs/screenshot.png)
+
 ## Status
 
 Built end-to-end in one extended session as a personal tool. No tests yet. Not deployed anywhere.
