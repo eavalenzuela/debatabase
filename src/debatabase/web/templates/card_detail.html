@@ -35,6 +35,15 @@
     <div class="bp">{{ card.block_path|join(' › ') }}</div>
   {% endif %}
 
+  {% if card.wiki_upload %}
+    <div class="wiki-provenance">
+      from <strong>{{ card.wiki_upload.school }} {{ card.wiki_upload.team }}</strong>
+      · {{ card.wiki_upload.side }}
+      {% if card.wiki_upload.tournament %} · {{ card.wiki_upload.tournament }}{% endif %}
+      {% if card.wiki_upload.round_name %} · {{ card.wiki_upload.round_name }}{% endif %}
+    </div>
+  {% endif %}
+
   <div class="tag-chips">
     {% for slug, label, status in tags %}
       <a class="chip {% if status == 'proposed' %}proposed{% endif %}" href="/search?tag={{ slug }}">{{ label }}</a>

@@ -55,6 +55,7 @@ from debatabase.models import (
     ContentTag,
     Source,
     User,
+    WikiUpload,
     Workspace,
     WorkspaceEntry,
 )
@@ -400,7 +401,10 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
         card_stmt = (
             select(Card)
             .join(Source, Source.id == Card.source_id)
-            .options(joinedload(Card.source))
+            .options(
+                joinedload(Card.source),
+                joinedload(Card.wiki_upload),
+            )
         )
         # Card count query — same WHERE, no JOIN needed if we wrap
         count_stmt = (
@@ -529,7 +533,10 @@ def card_detail(
     mode: RenderMode = Query(default="full"),
 ):
     with session_scope() as s:
-        card = s.get(Card, card_id, options=[joinedload(Card.source)])
+        card = s.get(
+            Card, card_id,
+            options=[joinedload(Card.source), joinedload(Card.wiki_upload)],
+        )
         if card is None:
             return HTMLResponse(f"Card {card_id} not found", status_code=404)
         tag_rows = s.execute(

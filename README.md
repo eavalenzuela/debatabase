@@ -19,6 +19,7 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - **Claude-assisted tagging** — bulk ingest sends each card to Haiku with the existing `content_tags` vocabulary; output is constrained to known slugs and lands as `status='proposed'` so an admin can promote. `scripts/retag_cards.py` runs the same flow over the existing corpus.
   - **Proposed-tag review** — `/admin/proposed-tags` (login-gated) groups every proposed link by tag with one-click approve / reject.
   - **Duplicate detection** — `/admin/duplicates` (login-gated) clusters near-duplicate cards by embedding cosine distance and lets you pick a canonical per cluster; non-canonicals get hidden from search and from "answers this card" results.
+  - **Opencaselist wiki ingest** — `scripts/fetch_weekly_dumps.py` + `scripts/ingest_wiki_dump.py` pull the public weekly bulk dumps from the S3 bucket and ingest every disclosed `.docx`. School / team / side / tournament / round metadata is parsed from filenames and surfaced as a badge on each card row. Content-hash dedup means re-ingesting weekly snapshots is cheap.
   - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
 - **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,992 canonical + 360 hidden duplicate cards, 88 analyticals, 2,138 sources, 86 content tags, drawn from ~75 source documents). Includes pre-computed Voyage embeddings so `/search` semantic ranking and `/cards/{id}/answers` work immediately on a fresh install — no backfill required.
 
@@ -77,6 +78,7 @@ src/debatabase/
   answer_finder.py                  Claude-driven inverse-claim generator
   tagger.py                         Claude-driven content-tag proposer
   dedup.py                          near-duplicate clustering via embeddings
+  wiki_filename.py                  opencaselist filename → metadata parser
   web/
     app.py                          FastAPI routes
     render.py                       markup-span → HTML rendering (full/highlight-only/etc.)
@@ -89,6 +91,8 @@ scripts/
   cleanup_cite_shorts.py            quality pass on auto-parsed cite shortcuts
   backfill_embeddings.py            one-shot semantic-search backfill (needs VOYAGE_API_KEY)
   retag_cards.py                    re-run Claude tagging across the corpus (needs ANTHROPIC_API_KEY)
+  fetch_weekly_dumps.py             download opencaselist weekly bulk zips from public S3
+  ingest_wiki_dump.py               walk an extracted dump, ingest .docx files with wiki provenance
 tests/                              pytest suite (export round-trip + markup ops)
 ```
 

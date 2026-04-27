@@ -365,8 +365,19 @@ def ingest_docx(
     docx_path: Path,
     session: Session,
     save_jsonl_to: Path | None = None,
+    *,
+    wiki_upload_id: int | None = None,
+    use_claude_tagger: bool | None = None,
 ) -> dict:
-    """Process one .docx end-to-end. Returns {cards_added, analyticals_added, errors, new_tag_slugs}."""
+    """Process one .docx end-to-end. Returns {cards_added, analyticals_added, errors, new_tag_slugs}.
+
+    ``wiki_upload_id`` propagates to inserted cards/analyticals so they
+    link back to the disclosed file they came from. ``use_claude_tagger``
+    lets the caller force-disable the Claude tagger (useful for the
+    wiki ingest path, where the corpus is huge and per-card Claude
+    calls would be expensive). When ``None``, falls back to the existing
+    auto-detect behavior (Claude when ANTHROPIC_API_KEY is set).
+    """
     paragraphs_data = extract_docx(docx_path)
     paragraphs = [
         {
@@ -405,7 +416,10 @@ def ingest_docx(
     # back to the legacy KEYWORD_RULES otherwise. Vocabulary is loaded
     # once per doc — the controlled vocabulary changes rarely enough
     # that a per-card refresh isn't worth the round-trips.
-    use_claude = has_tagging_capability()
+    if use_claude_tagger is None:
+        use_claude = has_tagging_capability()
+    else:
+        use_claude = use_claude_tagger
     vocab: list[VocabEntry] = []
     if use_claude:
         rows = session.execute(
@@ -458,6 +472,7 @@ def ingest_docx(
                     ),
                     approved_tag_slugs=inferred,
                     status=tag_status,
+                    wiki_upload_id=wiki_upload_id,
                 )
                 analyticals_added += 1
             else:
@@ -475,7 +490,11 @@ def ingest_docx(
                     card_text=body_text, markup=body_markup,
                     source_file=source_file, block_path=block_path,
                 )
-                insert_card(session, src, card, inferred, status=tag_status)
+                insert_card(
+                    session, src, card, inferred,
+                    status=tag_status,
+                    wiki_upload_id=wiki_upload_id,
+                )
                 cards_added += 1
             for slug, _ in inferred:
                 new_tag_slugs.add(slug)

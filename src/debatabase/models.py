@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -58,8 +59,12 @@ class Card(Base):
     canonical_card_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("cards.id")
     )
+    wiki_upload_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("wiki_uploads.id")
+    )
 
     source: Mapped[Source] = relationship(back_populates="cards")
+    wiki_upload: Mapped["WikiUpload | None"] = relationship()
     content_tag_links: Mapped[list["CardContentTag"]] = relationship(
         back_populates="card", cascade="all, delete-orphan"
     )
@@ -104,7 +109,11 @@ class Analytical(Base):
     source_file: Mapped[str | None] = mapped_column(Text)
     block_path: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    wiki_upload_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("wiki_uploads.id")
+    )
 
+    wiki_upload: Mapped["WikiUpload | None"] = relationship()
     content_tag_links: Mapped[list["AnalyticalContentTag"]] = relationship(
         back_populates="analytical", cascade="all, delete-orphan"
     )
@@ -228,3 +237,29 @@ class CardVariant(Base):
     )
 
     card: Mapped[Card] = relationship()
+
+
+class WikiUpload(Base):
+    """One row per disclosed .docx ingested from an opencaselist weekly bulk dump.
+
+    Deduped at file-content level via ``file_sha256`` — the same disclosed
+    file appears across many weekly snapshots, but we only want one upload
+    row per unique content. ``first_seen`` / ``last_seen`` track the date
+    range the content was visible in the dumps.
+    """
+
+    __tablename__ = "wiki_uploads"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    school: Mapped[str] = mapped_column(Text, nullable=False)
+    team: Mapped[str] = mapped_column(Text, nullable=False)
+    side: Mapped[str] = mapped_column(Text, nullable=False)
+    tournament: Mapped[str | None] = mapped_column(Text)
+    round_name: Mapped[str | None] = mapped_column(Text)
+    source_file: Mapped[str] = mapped_column(Text, nullable=False)
+    file_sha256: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    first_seen: Mapped[datetime] = mapped_column(Date, nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(Date, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

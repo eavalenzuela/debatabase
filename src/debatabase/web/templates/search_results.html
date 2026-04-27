@@ -44,6 +44,14 @@
           {% if c.source.publication %} · {{ c.source.publication }}{% endif %}
           {% if c.block_path %} · <span class="bp">{{ c.block_path|join(' › ') }}</span>{% endif %}
         </div>
+        {% if c.wiki_upload %}
+          <div class="wiki-provenance">
+            from <strong>{{ c.wiki_upload.school }} {{ c.wiki_upload.team }}</strong>
+            · {{ c.wiki_upload.side }}
+            {% if c.wiki_upload.tournament %} · {{ c.wiki_upload.tournament }}{% endif %}
+            {% if c.wiki_upload.round_name %} · {{ c.wiki_upload.round_name }}{% endif %}
+          </div>
+        {% endif %}
         <div class="tag-text">
           <a href="/cards/{{ c.id }}">{{ c.tag }}</a>
         </div>

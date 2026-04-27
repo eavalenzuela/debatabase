@@ -45,14 +45,18 @@ Camp files repeat the same articles with different cuts. Without dedup the corpu
 
 Not yet (deferred): per-source duplicate detection at ingest time (right now it's purely retroactive); a "merge the markup spans" action that combines multiple cutters' highlights into one canonical card. Both are nice-to-haves, not blockers.
 
-## 5. Opencaselist wiki scraper
+## 5. Opencaselist wiki ingest ✅ shipped (bulk-dump path)
 
-The disclosure wiki is where pre-round prep lives. Most teams disclose full 1AC / 1NC text. A "paste a wiki URL → ingest their disclosed positions" flow is enormous for tournament prep.
+The disclosure wiki is where pre-round prep lives. Reframed during implementation: the live opencaselist site requires login + has Google Doc embeds, but the **public S3 bucket of weekly bulk dumps** has every disclosed `.docx` directly. That's a much cleaner data source — no scraping, no auth, just `.docx` files we already know how to parse.
 
-- Fetch + parse opencaselist team pages (HTML, sometimes embedded Google Docs).
-- Reuse the existing `.docx` extractor where possible; add an HTML-run extractor for the inline cases.
-- Tag ingested cards with team / school / tournament / round metadata so they can be filtered separately from the personal corpus.
-- Respect the wiki's rate limits and cache aggressively; never re-fetch a page within a tournament window.
+- ✅ `scripts/fetch_weekly_dumps.py` — HEAD-probes the public S3 bucket for available weekly zips (no listing API), downloads + optionally extracts.
+- ✅ `scripts/ingest_wiki_dump.py` — walks an extracted dump, parses `{School}-{Team}-{Side}-…-Round-N.docx` filenames into structured metadata, hashes file content (SHA-256) for dedup across weekly snapshots, runs the existing `bulk.ingest_docx` per file with `wiki_upload_id` propagated to every inserted card / analytical.
+- ✅ `wiki_uploads` table (school, team, side, tournament, round, source_file, file_sha256, first_seen, last_seen). FK from `cards.wiki_upload_id` and `analyticals.wiki_upload_id`.
+- ✅ Filename parser (`src/debatabase/wiki_filename.py`) handles known variants: triple/double/single-hyphen separators, `.` -hyphen variants, no-sort-prefix variants, named rounds (Finals/Semis/Doubles), short school names. 13 tests cover real filenames from the corpus.
+- ✅ Search results and card detail render a "from {school} {team} · {side} · {tournament} {round}" badge on every wiki card. No additional filter UI for v1 — visibility per-row is enough to triage.
+- Claude tagger is force-disabled for the wiki ingest path because the corpus is large enough that per-card Haiku calls would cost real money. Legacy `KEYWORD_RULES` runs free; user can run `scripts/retag_cards.py` later if Claude-quality tagging on wiki cards is desired.
+
+**Deferred (v2)**: opponent inference (requires the live opencaselist pages, which need auth); a scheduled `/admin/wiki-refresh` endpoint or routine that auto-fetches the latest weekly zip; richer wiki-specific filter UI on `/search` (filter by team, by tournament, by round).
 
 ## 6. IRC-style user accounts (nickname + password, no email) ✅ shipped
 

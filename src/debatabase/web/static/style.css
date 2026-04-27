@@ -390,6 +390,17 @@ input[type=search] {
 }
 .dup-status { color: var(--muted); font-size: 0.85rem; }
 
+.wiki-provenance {
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 3px;
+  margin: 0.2rem 0 0.3rem;
+}
+.wiki-provenance strong { color: var(--accent); font-weight: 600; }
+
 .semantic-badge {
   display: inline-block;
   background: var(--accent);

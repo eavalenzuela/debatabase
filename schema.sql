@@ -60,7 +60,13 @@ CREATE TABLE cards (
     -- non-canonical rows out (canonical_card_id IS NOT NULL means
     -- "hidden duplicate"). Set via /admin/duplicates. Self-reference
     -- is intentionally not used — canonicals have NULL here.
-    canonical_card_id BIGINT REFERENCES cards(id) ON DELETE SET NULL
+    canonical_card_id BIGINT REFERENCES cards(id) ON DELETE SET NULL,
+    -- Wiki provenance (FEATURE_ADDITIONS.md #5): set on cards extracted
+    -- from opencaselist weekly bulk dumps; NULL for cards from the
+    -- user's personal corpus. The FK is added by ALTER TABLE after
+    -- wiki_uploads is defined below — we keep cards' DDL ordering
+    -- stable so existing migrations / dumps don't get re-shuffled.
+    wiki_upload_id  BIGINT
 );
 CREATE INDEX cards_search_tsv_idx ON cards USING GIN (search_tsv);
 CREATE INDEX cards_source_id_idx ON cards (source_id);
@@ -194,6 +200,42 @@ CREATE TABLE workspace_entries (
     UNIQUE (workspace_id, position)
 );
 CREATE INDEX workspace_entries_workspace_idx ON workspace_entries (workspace_id, position);
+
+-- Wiki uploads (FEATURE_ADDITIONS.md #5): one row per disclosed .docx
+-- pulled from the opencaselist weekly bulk dumps. cards.wiki_upload_id
+-- links each card back to the disclosed file it came from so the UI
+-- can show "from MontgomeryBell HoLi · Aff · TOC R1" per card.
+-- Dedup at the file-content level via file_sha256 — the same .docx
+-- appears across many weekly snapshots, and we only want one upload
+-- row per unique file. first_seen / last_seen track the date range we
+-- saw the content in the weekly dumps.
+CREATE TABLE wiki_uploads (
+    id              BIGSERIAL PRIMARY KEY,
+    school          TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    side            TEXT NOT NULL,                     -- "Aff" or "Neg"
+    tournament      TEXT,
+    round_name      TEXT,
+    source_file     TEXT NOT NULL,
+    file_sha256     TEXT NOT NULL UNIQUE,
+    first_seen      DATE NOT NULL,
+    last_seen       DATE NOT NULL,
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX wiki_uploads_school_idx ON wiki_uploads (school);
+CREATE INDEX wiki_uploads_team_idx ON wiki_uploads (school, team);
+CREATE INDEX wiki_uploads_tournament_idx ON wiki_uploads (tournament, side);
+
+-- Now that wiki_uploads exists, wire up the FKs from cards/analyticals.
+ALTER TABLE cards
+    ADD CONSTRAINT cards_wiki_upload_fk
+    FOREIGN KEY (wiki_upload_id) REFERENCES wiki_uploads(id) ON DELETE SET NULL;
+ALTER TABLE analyticals
+    ADD COLUMN wiki_upload_id BIGINT REFERENCES wiki_uploads(id) ON DELETE SET NULL;
+CREATE INDEX cards_wiki_upload_idx ON cards (wiki_upload_id)
+    WHERE wiki_upload_id IS NOT NULL;
+CREATE INDEX analyticals_wiki_upload_idx ON analyticals (wiki_upload_id)
+    WHERE wiki_upload_id IS NOT NULL;
 
 -- Bootstrap: a single placeholder user + their default workspace so v1
 -- routes can resolve a "current user" without auth. Auth

@@ -99,6 +99,7 @@ def insert_card(
     approved_tag_slugs: list[tuple[str, str]],  # [(slug, label), ...]
     *,
     status: str = "approved",
+    wiki_upload_id: int | None = None,
 ) -> Card:
     """Insert a card and its tag links.
 
@@ -117,6 +118,7 @@ def insert_card(
         source_file=card.source_file,
         block_path=card.block_path,
         ingested_at=datetime.now(UTC),
+        wiki_upload_id=wiki_upload_id,
     )
     session.add(c)
     session.flush()
@@ -139,6 +141,7 @@ def insert_analytical(
     approved_tag_slugs: list[tuple[str, str]],
     *,
     status: str = "approved",
+    wiki_upload_id: int | None = None,
 ) -> Analytical:
     a = Analytical(
         argument=data.argument,
@@ -147,6 +150,7 @@ def insert_analytical(
         source_file=data.source_file,
         block_path=data.block_path,
         ingested_at=datetime.now(UTC),
+        wiki_upload_id=wiki_upload_id,
     )
     session.add(a)
     session.flush()
