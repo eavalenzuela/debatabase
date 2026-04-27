@@ -116,3 +116,53 @@ class AnalyticalContentTag(Base):
 
     analytical: Mapped[Analytical] = relationship(back_populates="content_tag_links")
     content_tag: Mapped[ContentTag] = relationship()
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nickname: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    pw_hash: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    workspace: Mapped["Workspace"] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False, unique=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="workspace")
+    entries: Mapped[list["WorkspaceEntry"]] = relationship(
+        back_populates="workspace",
+        order_by="WorkspaceEntry.position",
+        cascade="all, delete-orphan",
+    )
+
+
+class WorkspaceEntry(Base):
+    __tablename__ = "workspace_entries"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("workspaces.id"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    header_path: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    card_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cards.id"))
+    analytical_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("analyticals.id")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    workspace: Mapped[Workspace] = relationship(back_populates="entries")
+    card: Mapped[Card | None] = relationship()
+    analytical: Mapped[Analytical | None] = relationship()

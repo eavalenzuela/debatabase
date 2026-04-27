@@ -2,6 +2,7 @@
 -- drop the .pgdata volume, recreate. Schema locks in before going public.
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS citext;
 
 -- A source is a single citable work (article, book, etc.). Multiple cards
 -- may be cut from the same source; we dedupe at the source level so
@@ -105,3 +106,47 @@ CREATE TABLE analytical_content_tags (
     PRIMARY KEY (analytical_id, content_tag_id)
 );
 CREATE INDEX analytical_content_tags_tag_idx ON analytical_content_tags (content_tag_id, status);
+
+-- Users. IRC-style: nickname + password, no email. pw_hash is nullable so
+-- the bootstrap "local" user (single-user mode, pre-auth) has no password
+-- yet. Real registration / login flow lands with FEATURE_ADDITIONS.md #6.
+CREATE TABLE users (
+    id              BIGSERIAL PRIMARY KEY,
+    nickname        CITEXT NOT NULL UNIQUE,
+    pw_hash         TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Workspace: each user has exactly one current speech-doc workspace.
+-- Enforced by UNIQUE(user_id). Multi-doc / saved-history is a future
+-- migration, not v1.
+CREATE TABLE workspaces (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per card or analytical added to a workspace, ordered by
+-- `position` and grouped under a per-entry `header_path` (mirrors
+-- cards.block_path so the export can emit Heading 1/2/3 by diffing
+-- consecutive entries' paths).
+CREATE TABLE workspace_entries (
+    id              BIGSERIAL PRIMARY KEY,
+    workspace_id    BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    position        INTEGER NOT NULL,
+    header_path     TEXT[],
+    card_id         BIGINT REFERENCES cards(id) ON DELETE SET NULL,
+    analytical_id   BIGINT REFERENCES analyticals(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT workspace_entry_one_target
+        CHECK ((card_id IS NULL) <> (analytical_id IS NULL)),
+    UNIQUE (workspace_id, position)
+);
+CREATE INDEX workspace_entries_workspace_idx ON workspace_entries (workspace_id, position);
+
+-- Bootstrap: a single placeholder user so v1 routes can resolve a
+-- "current user" without auth. Auth (FEATURE_ADDITIONS.md #6) replaces
+-- this with real registration; the row stays valid through that change.
+INSERT INTO users (id, nickname) VALUES (1, 'local');
+SELECT setval(pg_get_serial_sequence('users', 'id'), 1, true);
+INSERT INTO workspaces (user_id) VALUES (1);
