@@ -9,6 +9,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -124,7 +125,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     nickname: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     pw_hash: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     workspace: Mapped["Workspace"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -138,7 +141,9 @@ class Workspace(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id"), nullable=False, unique=True
     )
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     user: Mapped[User] = relationship(back_populates="workspace")
     entries: Mapped[list["WorkspaceEntry"]] = relationship(
@@ -161,7 +166,9 @@ class WorkspaceEntry(Base):
     analytical_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("analyticals.id")
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     workspace: Mapped[Workspace] = relationship(back_populates="entries")
     card: Mapped[Card | None] = relationship()

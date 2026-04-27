@@ -41,6 +41,17 @@
     {% endfor %}
   </div>
 
+  <form class="ws-add"
+        hx-post="/workspace/entries"
+        hx-target="#ws-feedback-{{ card.id }}"
+        hx-swap="innerHTML">
+    <input type="hidden" name="card_id" value="{{ card.id }}">
+    <input type="hidden" name="header_path"
+           value="{{ (card.block_path or [])|join(' > ') }}">
+    <button type="submit">+ Add to workspace</button>
+    <span class="ws-feedback" id="ws-feedback-{{ card.id }}"></span>
+  </form>
+
   <nav class="render-modes">
     <a class="{% if mode == 'full' %}active{% endif %}" href="?mode=full">Full</a>
     {% if has_underline %}<a class="{% if mode == 'underline-only' %}active{% endif %}" href="?mode=underline-only">Underlined only</a>{% endif %}

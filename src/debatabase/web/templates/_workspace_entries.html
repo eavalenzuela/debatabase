@@ -1,0 +1,66 @@
+{% if n_entries == 0 %}
+  <p class="ws-empty">
+    No entries yet. Add cards from
+    <a href="/search">search</a> or any card detail page.
+  </p>
+{% else %}
+  {% for path, entries in groups %}
+    <div class="ws-group">
+      <div class="ws-group-header">
+        {% if path %}{{ path|join(' › ') }}{% else %}<em>(no header)</em>{% endif %}
+      </div>
+      <ul class="ws-entry-list">
+        {% for e in entries %}
+          <li class="ws-entry">
+            <div class="ws-entry-controls">
+              <form hx-patch="/workspace/entries/{{ e.id }}"
+                    hx-target="#ws-entries" hx-swap="innerHTML">
+                <input type="hidden" name="direction" value="up">
+                <button type="submit" title="move up">↑</button>
+              </form>
+              <form hx-patch="/workspace/entries/{{ e.id }}"
+                    hx-target="#ws-entries" hx-swap="innerHTML">
+                <input type="hidden" name="direction" value="down">
+                <button type="submit" title="move down">↓</button>
+              </form>
+              <form hx-delete="/workspace/entries/{{ e.id }}"
+                    hx-target="#ws-entries" hx-swap="innerHTML"
+                    hx-confirm="Remove this entry from the workspace?">
+                <button type="submit" title="remove">×</button>
+              </form>
+            </div>
+
+            <div class="ws-entry-body">
+              {% if e.card is not none %}
+                <div class="cite">
+                  <a href="/sources/{{ e.card.source_id }}">{{ e.card.source.cite_short }}</a>
+                  {% if e.card.source.publication %} · {{ e.card.source.publication }}{% endif %}
+                </div>
+                <div class="tag-text">
+                  <a href="/cards/{{ e.card.id }}">{{ e.card.tag }}</a>
+                </div>
+                <div class="snippet">{{ snippet(e.card.card_text)|safe }}</div>
+              {% elif e.analytical is not none %}
+                <div class="cite">
+                  analytical{% if e.analytical.answer_to %} · answers: <em>{{ e.analytical.answer_to }}</em>{% endif %}
+                </div>
+                <div class="tag-text">{{ e.analytical.argument[:200] }}{% if e.analytical.argument|length > 200 %}…{% endif %}</div>
+              {% endif %}
+
+              <details class="ws-edit-header">
+                <summary>edit header path</summary>
+                <form hx-patch="/workspace/entries/{{ e.id }}"
+                      hx-target="#ws-entries" hx-swap="innerHTML">
+                  <input type="text" name="header_path"
+                         value="{{ (e.header_path or [])|join(' > ') }}"
+                         placeholder="Aff > 1AC > Adv. 1">
+                  <button type="submit">save</button>
+                </form>
+              </details>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+{% endif %}

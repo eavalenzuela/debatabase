@@ -50,6 +50,16 @@
             <a class="chip" href="/search?tag={{ slug }}">{{ label }}</a>
           {% endfor %}
         </div>
+        <form class="ws-add inline"
+              hx-post="/workspace/entries"
+              hx-target="#ws-feedback-row-{{ c.id }}"
+              hx-swap="innerHTML">
+          <input type="hidden" name="card_id" value="{{ c.id }}">
+          <input type="hidden" name="header_path"
+                 value="{{ (c.block_path or [])|join(' > ') }}">
+          <button type="submit">+ workspace</button>
+          <span class="ws-feedback" id="ws-feedback-row-{{ c.id }}"></span>
+        </form>
       </li>
     {% endfor %}
   </ul>

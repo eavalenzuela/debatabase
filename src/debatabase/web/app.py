@@ -14,20 +14,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Form, Query, Request
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select, text as sqltext
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import Session, joinedload
 
 from debatabase.db import session_scope
+from debatabase.docx_export import (
+    ExportAnalytical,
+    ExportCard,
+    ExportEntry,
+    render_workspace_to_docx,
+)
 from debatabase.models import (
     Analytical,
     Card,
     CardContentTag,
     ContentTag,
     Source,
+    Workspace,
+    WorkspaceEntry,
 )
 from debatabase.web.render import RenderMode, render_card, snippet
 
@@ -313,4 +321,243 @@ def analyticals_index(request: Request):
         rows = s.execute(select(Analytical).order_by(Analytical.id)).scalars().all()
     return templates.TemplateResponse(
         request, "analyticals_index.html", {"analyticals": rows}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Workspace
+#
+# Each user has exactly one current workspace (UNIQUE on workspaces.user_id).
+# v1 hardcodes user_id=1 (the bootstrap "local" user); FEATURE_ADDITIONS.md #6
+# replaces get_current_user_id() with a real session lookup.
+# ---------------------------------------------------------------------------
+
+def get_current_user_id() -> int:
+    return 1
+
+
+def _get_workspace(s: Session, user_id: int) -> Workspace:
+    ws = s.scalar(select(Workspace).where(Workspace.user_id == user_id))
+    if ws is None:
+        ws = Workspace(user_id=user_id)
+        s.add(ws)
+        s.flush()
+    return ws
+
+
+def _next_position(s: Session, workspace_id: int) -> int:
+    cur = s.scalar(
+        select(func.coalesce(func.max(WorkspaceEntry.position), 0)).where(
+            WorkspaceEntry.workspace_id == workspace_id
+        )
+    )
+    return int(cur or 0) + 1
+
+
+def _parse_header_path(raw: str | None) -> list[str]:
+    """Accept ' > ' (UI display), '›' (compact), or comma as separators."""
+    if not raw or not raw.strip():
+        return []
+    for sep in (" > ", " › ", "›", ","):
+        if sep in raw:
+            return [p.strip() for p in raw.split(sep) if p.strip()]
+    return [raw.strip()]
+
+
+def _load_entries(s: Session, workspace_id: int) -> list[WorkspaceEntry]:
+    return list(
+        s.execute(
+            select(WorkspaceEntry)
+            .where(WorkspaceEntry.workspace_id == workspace_id)
+            .options(
+                joinedload(WorkspaceEntry.card).joinedload(Card.source),
+                joinedload(WorkspaceEntry.analytical),
+            )
+            .order_by(WorkspaceEntry.position)
+        ).scalars().unique().all()
+    )
+
+
+def _group_entries(
+    entries: list[WorkspaceEntry],
+) -> list[tuple[list[str], list[WorkspaceEntry]]]:
+    """Group consecutive entries that share a header_path, preserving order."""
+    groups: list[tuple[list[str], list[WorkspaceEntry]]] = []
+    for e in entries:
+        path = list(e.header_path or [])
+        if not groups or groups[-1][0] != path:
+            groups.append((path, []))
+        groups[-1][1].append(e)
+    return groups
+
+
+def _entries_fragment(request: Request, user_id: int) -> HTMLResponse:
+    with session_scope() as s:
+        ws = _get_workspace(s, user_id)
+        entries = _load_entries(s, ws.id)
+    return templates.TemplateResponse(
+        request,
+        "_workspace_entries.html",
+        {"groups": _group_entries(entries), "n_entries": len(entries)},
+    )
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+def workspace_view(
+    request: Request, user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        ws = _get_workspace(s, user_id)
+        entries = _load_entries(s, ws.id)
+    return templates.TemplateResponse(
+        request,
+        "workspace.html",
+        {
+            "groups": _group_entries(entries),
+            "n_entries": len(entries),
+        },
+    )
+
+
+@app.post("/workspace/entries", response_class=HTMLResponse)
+def add_workspace_entry(
+    request: Request,
+    card_id: int | None = Form(default=None),
+    analytical_id: int | None = Form(default=None),
+    header_path: str | None = Form(default=None),
+    user_id: int = Depends(get_current_user_id),
+):
+    if (card_id is None) == (analytical_id is None):
+        return HTMLResponse(
+            "must specify exactly one of card_id / analytical_id",
+            status_code=400,
+        )
+    with session_scope() as s:
+        ws = _get_workspace(s, user_id)
+        entry = WorkspaceEntry(
+            workspace_id=ws.id,
+            position=_next_position(s, ws.id),
+            header_path=_parse_header_path(header_path) or None,
+            card_id=card_id,
+            analytical_id=analytical_id,
+        )
+        s.add(entry)
+    # HTMX feedback: small confirmation. Caller decides where to swap it in.
+    return HTMLResponse(
+        '<span class="ws-added">added · '
+        '<a href="/workspace">view workspace</a></span>'
+    )
+
+
+@app.delete("/workspace/entries/{entry_id}", response_class=HTMLResponse)
+def delete_workspace_entry(
+    request: Request,
+    entry_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    with session_scope() as s:
+        ws = _get_workspace(s, user_id)
+        entry = s.get(WorkspaceEntry, entry_id)
+        if entry is None or entry.workspace_id != ws.id:
+            return HTMLResponse("not found", status_code=404)
+        s.delete(entry)
+    return _entries_fragment(request, user_id)
+
+
+@app.patch("/workspace/entries/{entry_id}", response_class=HTMLResponse)
+def patch_workspace_entry(
+    request: Request,
+    entry_id: int,
+    direction: str | None = Form(default=None),
+    header_path: str | None = Form(default=None),
+    user_id: int = Depends(get_current_user_id),
+):
+    with session_scope() as s:
+        ws = _get_workspace(s, user_id)
+        entry = s.get(WorkspaceEntry, entry_id)
+        if entry is None or entry.workspace_id != ws.id:
+            return HTMLResponse("not found", status_code=404)
+
+        if direction in ("up", "down"):
+            if direction == "up":
+                neighbor_q = (
+                    select(WorkspaceEntry)
+                    .where(
+                        WorkspaceEntry.workspace_id == ws.id,
+                        WorkspaceEntry.position < entry.position,
+                    )
+                    .order_by(WorkspaceEntry.position.desc())
+                    .limit(1)
+                )
+            else:
+                neighbor_q = (
+                    select(WorkspaceEntry)
+                    .where(
+                        WorkspaceEntry.workspace_id == ws.id,
+                        WorkspaceEntry.position > entry.position,
+                    )
+                    .order_by(WorkspaceEntry.position.asc())
+                    .limit(1)
+                )
+            neighbor = s.scalar(neighbor_q)
+            if neighbor is not None:
+                # UNIQUE(workspace_id, position) requires a sentinel detour.
+                # Use a guaranteed-unused negative slot during the swap.
+                a, b = entry.position, neighbor.position
+                entry.position = -abs(a) - 1
+                s.flush()
+                neighbor.position = a
+                s.flush()
+                entry.position = b
+                s.flush()
+
+        if header_path is not None:
+            entry.header_path = _parse_header_path(header_path) or None
+
+    return _entries_fragment(request, user_id)
+
+
+@app.get("/workspace/export.docx")
+def export_workspace_docx(user_id: int = Depends(get_current_user_id)):
+    with session_scope() as s:
+        ws = _get_workspace(s, user_id)
+        entries = _load_entries(s, ws.id)
+
+        export_entries: list[ExportEntry] = []
+        for e in entries:
+            path = list(e.header_path or [])
+            if e.card is not None:
+                export_entries.append(
+                    ExportEntry(
+                        header_path=path,
+                        card=ExportCard(
+                            tag=e.card.tag,
+                            tag_markup=e.card.tag_markup or [],
+                            card_text=e.card.card_text,
+                            markup=e.card.markup or [],
+                            cite_short=e.card.source.cite_short,
+                            raw_cite=e.card.source.raw_cite,
+                        ),
+                    )
+                )
+            elif e.analytical is not None:
+                export_entries.append(
+                    ExportEntry(
+                        header_path=path,
+                        analytical=ExportAnalytical(
+                            argument=e.analytical.argument,
+                            argument_markup=e.analytical.argument_markup or [],
+                            answer_to=e.analytical.answer_to,
+                        ),
+                    )
+                )
+
+    blob = render_workspace_to_docx("workspace", export_entries)
+    return Response(
+        content=blob,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document"
+        ),
+        headers={"Content-Disposition": 'attachment; filename="workspace.docx"'},
     )

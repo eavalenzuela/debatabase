@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+{% block title %}Workspace · debatabase{% endblock %}
+{% block content %}
+<section class="workspace">
+  <div class="ws-toolbar">
+    <h1>Workspace</h1>
+    <div class="ws-actions">
+      <span class="ws-count">{{ n_entries }} {{ 'entry' if n_entries == 1 else 'entries' }}</span>
+      <a class="ws-export {% if n_entries == 0 %}disabled{% endif %}"
+         href="{% if n_entries > 0 %}/workspace/export.docx{% else %}#{% endif %}">
+        Export .docx
+      </a>
+    </div>
+  </div>
+
+  <div id="ws-entries">
+    {% include "_workspace_entries.html" %}
+  </div>
+</section>
+{% endblock %}
