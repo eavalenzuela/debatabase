@@ -47,13 +47,14 @@ The disclosure wiki is where pre-round prep lives. Most teams disclose full 1AC 
 - Tag ingested cards with team / school / tournament / round metadata so they can be filtered separately from the personal corpus.
 - Respect the wiki's rate limits and cache aggressively; never re-fetch a page within a tournament window.
 
-## 6. IRC-style user accounts (nickname + password, no email)
+## 6. IRC-style user accounts (nickname + password, no email) ✅ shipped
 
-The workspace in #1 and the variants in #2 are both per-user concepts, but v1 ships with a single placeholder user. This feature swaps in a real registration / login flow — modeled on IRC NickServ rather than a typical webapp account system.
+The workspace in #1 and the variants in #2 are per-user concepts; pre-#6 the app shipped with a single placeholder `local` user. #6 swaps in real registration / login — IRC NickServ-flavored rather than a typical webapp account system.
 
 - No email, no password reset email loops, no "forgot password" flow. If you lose your password you lose your nick.
-- Register: choose a nickname + password. Server stores `argon2` hash. Nicknames are unique, case-insensitive.
-- Login sets a long-lived session cookie. No 2FA, no OAuth, no social login.
-- All workspace endpoints become user-scoped: a user only ever sees their own workspace and their own variants. The canonical card corpus stays globally readable to anyone logged in.
-- Schema is already shaped for this — `users` and `workspaces.user_id` exist from #1; this feature just wires up registration, login, and session middleware.
+- Register: choose a nickname + password (min 8 chars). Server stores an `argon2` hash. Nicknames are unique, case-insensitive (CITEXT).
+- Login sets a signed session cookie via Starlette's `SessionMiddleware`. No 2FA, no OAuth, no social login.
+- A small middleware redirects unauthenticated requests to `/login` for any `/workspaces*` path. The card corpus (search, tags, sources, card detail, analyticals) stays publicly browseable.
+- The very first registration on a fresh install can check "claim the existing pre-auth workspace data" to transmute the bootstrap `local` user (sets pw_hash + renames) so existing test workspaces aren't orphaned. Subsequent registrations create new users.
+- Verified: cross-user PATCH/GET on another user's workspace or entry returns 404; sessions persist across reloads; logout clears the session cookie.
 - Optional later: nick "ghosting" (kick a stale session if the same nick logs in elsewhere), nick reservation timeout. Not in v1.

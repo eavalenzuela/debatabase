@@ -15,6 +15,7 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - Pagination with result counts
   - **Workspaces** — per-user named speech-doc workspaces. Add cards or analyticals from search or card detail with one click; reorder via drag-and-drop; group entries under editable `header_path` headers; clear; export to `.docx` named after the workspace.
   - **In-browser re-highlighting** — select text in a card body inside a workspace and click highlight / underline / clear. Edits are stored as a workspace-scoped **card variant**; the canonical card is never mutated and global card detail / search continue to show the original. Revert any time.
+  - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
 - **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,996 cards, 88 analyticals, 2,139 sources, 86 content tags, drawn from ~75 source documents).
 
 ## Domain glossary
@@ -67,6 +68,7 @@ src/debatabase/
   bulk.py                           reusable cite parser + tag inference + map_doc
   docx_export.py                    workspace → .docx (inverse of parser/extract.py)
   markup_ops.py                     pure span-ops for the re-highlighting flow
+  auth.py                           argon2 hashing + nickname/password validation
   web/
     app.py                          FastAPI routes
     render.py                       markup-span → HTML rendering (full/highlight-only/etc.)
@@ -107,6 +109,8 @@ The suite covers the `.docx` export round-trip (export → re-extract → assert
 
 ## Status
 
-Personal tool, single-user (no auth — see `FEATURE_ADDITIONS.md` #6 for the IRC-style nickname/password plan). Read-side and prep-side both work end-to-end: ingest cards → search and browse → assemble into a named workspace → re-highlight per round → export `.docx`. Not deployed anywhere.
+Personal tool, single-user-friendly but multi-user-ready. Auth is IRC-style: nickname + password, no email. Read-side and prep-side both work end-to-end: ingest cards → search and browse (publicly) → register an account → assemble cards into a named workspace → re-highlight per round → export `.docx`. Not deployed anywhere.
+
+If you start fresh from `db_seed.sql`, the first time you visit `/register` you'll see a "claim the existing pre-auth workspace data" checkbox — tick it on the first real registration so the bootstrap `local` user becomes you. Subsequent users register normally.
 
 The roadmap with what's planned next lives in [`FEATURE_ADDITIONS.md`](FEATURE_ADDITIONS.md).

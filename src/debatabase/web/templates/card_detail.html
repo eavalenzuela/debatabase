@@ -41,16 +41,18 @@
     {% endfor %}
   </div>
 
-  <form class="ws-add"
-        hx-post="/workspaces/{{ current_workspace_id }}/entries"
-        hx-target="#ws-feedback-{{ card.id }}"
-        hx-swap="innerHTML">
-    <input type="hidden" name="card_id" value="{{ card.id }}">
-    <input type="hidden" name="header_path"
-           value="{{ (card.block_path or [])|join(' > ') }}">
-    <button type="submit">+ Add to workspace</button>
-    <span class="ws-feedback" id="ws-feedback-{{ card.id }}"></span>
-  </form>
+  {% if current_workspace_id %}
+    <form class="ws-add"
+          hx-post="/workspaces/{{ current_workspace_id }}/entries"
+          hx-target="#ws-feedback-{{ card.id }}"
+          hx-swap="innerHTML">
+      <input type="hidden" name="card_id" value="{{ card.id }}">
+      <input type="hidden" name="header_path"
+             value="{{ (card.block_path or [])|join(' > ') }}">
+      <button type="submit">+ Add to workspace</button>
+      <span class="ws-feedback" id="ws-feedback-{{ card.id }}"></span>
+    </form>
+  {% endif %}
 
   <nav class="render-modes">
     <a class="{% if mode == 'full' %}active{% endif %}" href="?mode=full">Full</a>

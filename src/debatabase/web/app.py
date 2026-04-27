@@ -16,13 +16,23 @@ from pathlib import Path
 
 import re
 
-from fastapi import Depends, FastAPI, Form, Query, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select, text as sqltext
 from sqlalchemy.orm import Session, joinedload
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
+from debatabase.auth import (
+    MIN_PASSWORD_LEN,
+    hash_password,
+    validate_nickname,
+    validate_password,
+    verify_password,
+)
+from debatabase.config import settings
 from debatabase.db import session_scope
 from debatabase.docx_export import (
     ExportAnalytical,
@@ -50,7 +60,63 @@ templates.env.globals["render_card"] = render_card
 templates.env.globals["snippet"] = snippet
 
 app = FastAPI(title="debatabase")
+
+
+# ---------------------------------------------------------------------------
+# Auth middleware
+#
+# Pre-#6: get_current_user_id() returned a hardcoded 1. Now it reads the
+# signed session cookie. Endpoints that require auth use Depends on the
+# required version; pages that show the workspace buttons conditionally
+# (search, card detail) read request.session directly.
+# ---------------------------------------------------------------------------
+
+# Path prefixes that are visible without logging in. The card corpus
+# itself is public; only workspace / variant endpoints require auth.
+_PUBLIC_PREFIXES = (
+    "/login",
+    "/register",
+    "/logout",
+    "/static/",
+    "/search",
+    "/tags",
+    "/sources/",
+    "/cards/",
+    "/analyticals",
+)
+_PUBLIC_EXACT = {"/", "/tags", "/analyticals"}
+
+
+async def _require_login(request: Request, call_next):
+    path = request.url.path
+    if (
+        path in _PUBLIC_EXACT
+        or any(path == p or path.startswith(p) for p in _PUBLIC_PREFIXES)
+        or "user_id" in request.session
+    ):
+        return await call_next(request)
+    return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
+
+
+# Order matters: the LAST-added middleware is OUTERMOST and runs first.
+# We need SessionMiddleware to be outermost so request.session is set up
+# by the time _require_login (inner) reads it.
+app.add_middleware(BaseHTTPMiddleware, dispatch=_require_login)
+app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
+
+
+def get_current_user_id_optional(request: Request) -> int | None:
+    return request.session.get("user_id")
+
+
+def get_current_user_id(request: Request) -> int:
+    """Required-auth dep: 401 if no session. The middleware redirects
+    GET pages to /login; HTMX/API calls get a clean 401."""
+    uid = request.session.get("user_id")
+    if uid is None:
+        raise HTTPException(status_code=401, detail="login required")
+    return uid
 
 PAGE_SIZE = 50
 
@@ -93,6 +159,153 @@ def _tag_tree(session) -> list[dict]:
     for n in by_id.values():
         n["children"].sort(key=lambda c: c["slug"])
     return roots
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = Query(default="/workspaces")):
+    if "user_id" in request.session:
+        return RedirectResponse(next, status_code=303)
+    return templates.TemplateResponse(
+        request, "login.html", {"next": next, "error": None}
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(
+    request: Request,
+    nickname: str = Form(...),
+    password: str = Form(...),
+    next: str = Form(default="/workspaces"),
+):
+    with session_scope() as s:
+        user = s.scalar(select(User).where(User.nickname == nickname.strip()))
+        if user is None or not verify_password(user.pw_hash, password):
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {"next": next, "error": "invalid nickname or password"},
+                status_code=401,
+            )
+        user_id = user.id
+        user_nick = user.nickname
+    request.session["user_id"] = user_id
+    request.session["user_nick"] = user_nick
+    return RedirectResponse(next or "/workspaces", status_code=303)
+
+
+@app.get("/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    if "user_id" in request.session:
+        return RedirectResponse("/workspaces", status_code=303)
+    with session_scope() as s:
+        # Offer the "claim local" option only if it would actually do
+        # anything: no real users yet AND a placeholder user exists.
+        any_real_user = s.scalar(
+            select(func.count(User.id)).where(User.pw_hash.is_not(None))
+        )
+        placeholder = s.scalar(
+            select(User).where(User.pw_hash.is_(None)).order_by(User.id).limit(1)
+        )
+        offer_claim = (any_real_user == 0) and (placeholder is not None)
+    return templates.TemplateResponse(
+        request,
+        "register.html",
+        {"error": None, "offer_claim": offer_claim, "min_password_len": MIN_PASSWORD_LEN},
+    )
+
+
+@app.post("/register", response_class=HTMLResponse)
+def register_submit(
+    request: Request,
+    nickname: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+    claim_local: bool = Form(default=False),
+):
+    nick_err = validate_nickname(nickname)
+    if nick_err:
+        return _register_error(request, nick_err)
+    pw_err = validate_password(password)
+    if pw_err:
+        return _register_error(request, pw_err)
+    if password != password_confirm:
+        return _register_error(request, "passwords don't match")
+
+    nickname = nickname.strip()
+    with session_scope() as s:
+        clash = s.scalar(select(User).where(User.nickname == nickname))
+        if clash is not None:
+            return _register_error(request, "nickname already taken")
+
+        user_id: int
+        if claim_local:
+            any_real = s.scalar(
+                select(func.count(User.id)).where(User.pw_hash.is_not(None))
+            )
+            placeholder = (
+                s.scalar(
+                    select(User)
+                    .where(User.pw_hash.is_(None))
+                    .order_by(User.id)
+                    .limit(1)
+                )
+                if any_real == 0
+                else None
+            )
+            if placeholder is not None:
+                placeholder.nickname = nickname
+                placeholder.pw_hash = hash_password(password)
+                user_id = placeholder.id
+            else:
+                user_id = _create_fresh_user(s, nickname, password)
+        else:
+            user_id = _create_fresh_user(s, nickname, password)
+
+    request.session["user_id"] = user_id
+    request.session["user_nick"] = nickname
+    return RedirectResponse("/workspaces", status_code=303)
+
+
+def _create_fresh_user(s: Session, nickname: str, password: str) -> int:
+    user = User(nickname=nickname, pw_hash=hash_password(password))
+    s.add(user)
+    s.flush()
+    ws = Workspace(user_id=user.id, name="My Workspace")
+    s.add(ws)
+    s.flush()
+    user.current_workspace_id = ws.id
+    return user.id
+
+
+def _register_error(request: Request, error: str) -> HTMLResponse:
+    with session_scope() as s:
+        any_real_user = s.scalar(
+            select(func.count(User.id)).where(User.pw_hash.is_not(None))
+        )
+        placeholder = s.scalar(
+            select(User).where(User.pw_hash.is_(None)).order_by(User.id).limit(1)
+        )
+        offer_claim = (any_real_user == 0) and (placeholder is not None)
+    return templates.TemplateResponse(
+        request,
+        "register.html",
+        {
+            "error": error,
+            "offer_claim": offer_claim,
+            "min_password_len": MIN_PASSWORD_LEN,
+        },
+        status_code=400,
+    )
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +420,19 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
         # Tag tree for sidebar
         tag_tree = _tag_tree(s)
 
-        # Current workspace id for "+ Add to workspace" buttons
-        current_user = _get_user(s, get_current_user_id())
-        current_workspace_id = current_user.current_workspace_id
-        if current_workspace_id is None:
-            ws_obj = _ensure_current_workspace(s, current_user.id)
-            current_workspace_id = ws_obj.id
+        # Current workspace id (None if not logged in) — controls whether
+        # the "+ Add to workspace" buttons render.
+        current_user_id = request.session.get("user_id")
+        current_workspace_id = None
+        current_user_nick = None
+        if current_user_id is not None:
+            current_user = s.get(User, current_user_id)
+            if current_user is not None:
+                current_user_nick = current_user.nickname
+                current_workspace_id = current_user.current_workspace_id
+                if current_workspace_id is None:
+                    ws_obj = _ensure_current_workspace(s, current_user.id)
+                    current_workspace_id = ws_obj.id
 
     # Pagination math
     total_pages = max(1, (total_cards_matching + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -241,6 +461,7 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
             "end_idx": end_idx,
             "page_size": PAGE_SIZE,
             "current_workspace_id": current_workspace_id,
+            "current_user_nick": current_user_nick,
         },
     )
 
@@ -264,11 +485,15 @@ def card_detail(
             .join(CardContentTag, CardContentTag.content_tag_id == ContentTag.id)
             .where(CardContentTag.card_id == card_id)
         ).all()
-        current_user = _get_user(s, get_current_user_id())
-        current_workspace_id = current_user.current_workspace_id
-        if current_workspace_id is None:
-            ws_obj = _ensure_current_workspace(s, current_user.id)
-            current_workspace_id = ws_obj.id
+        current_user_id = request.session.get("user_id")
+        current_workspace_id = None
+        if current_user_id is not None:
+            cu = s.get(User, current_user_id)
+            if cu is not None:
+                current_workspace_id = cu.current_workspace_id
+                if current_workspace_id is None:
+                    ws_obj = _ensure_current_workspace(s, cu.id)
+                    current_workspace_id = ws_obj.id
 
     has_highlight = any(s["kind"] == "highlight" for s in (card.markup or []))
     has_underline = any(s["kind"] == "underline" for s in (card.markup or []))
@@ -348,14 +573,8 @@ def analyticals_index(request: Request):
 #
 # A user can have many named workspaces; one is "current" (where
 # "+ Add to workspace" buttons send adds, and where /workspace
-# redirects). v1 hardcodes user_id=1 (the bootstrap "local" user);
-# FEATURE_ADDITIONS.md #6 replaces get_current_user_id() with a real
-# session lookup.
+# redirects).
 # ---------------------------------------------------------------------------
-
-def get_current_user_id() -> int:
-    return 1
-
 
 def _get_user(s: Session, user_id: int) -> User:
     user = s.get(User, user_id)

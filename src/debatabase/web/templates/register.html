@@ -1,0 +1,36 @@
+{% extends "_base.html" %}
+{% block title %}Register · debatabase{% endblock %}
+{% block content %}
+<section class="auth-form">
+  <h1>Register</h1>
+  <p class="auth-help">
+    IRC-style: pick a nickname and a password. No email, no recovery.
+    If you lose your password, you lose your nick.
+  </p>
+  {% if error %}<p class="auth-error">{{ error }}</p>{% endif %}
+  <form method="post" action="/register">
+    <label>
+      Nickname
+      <input type="text" name="nickname" autocomplete="username" autofocus required maxlength="32">
+    </label>
+    <label>
+      Password (min {{ min_password_len }} chars)
+      <input type="password" name="password" autocomplete="new-password" required minlength="{{ min_password_len }}">
+    </label>
+    <label>
+      Confirm password
+      <input type="password" name="password_confirm" autocomplete="new-password" required minlength="{{ min_password_len }}">
+    </label>
+    {% if offer_claim %}
+      <label class="auth-claim">
+        <input type="checkbox" name="claim_local" value="true">
+        Claim the existing pre-auth workspace data as my own (recommended for the very first registration on a fresh install)
+      </label>
+    {% endif %}
+    <button type="submit">Register</button>
+  </form>
+  <p class="auth-alt">
+    Already have an account? <a href="/login">Log in</a>
+  </p>
+</section>
+{% endblock %}

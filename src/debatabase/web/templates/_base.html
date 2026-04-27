@@ -14,8 +14,21 @@
       <a href="/search">Search</a>
       <a href="/tags">Tags</a>
       <a href="/analyticals">Analyticals</a>
-      <a href="/workspaces">Workspaces</a>
+      {% if request.session.get('user_id') %}
+        <a href="/workspaces">Workspaces</a>
+      {% endif %}
     </nav>
+    <div class="auth-status">
+      {% if request.session.get('user_id') %}
+        <span class="auth-nick">{{ request.session.get('user_nick') }}</span>
+        <form method="post" action="/logout" style="display:inline">
+          <button type="submit" class="auth-logout">logout</button>
+        </form>
+      {% else %}
+        <a href="/login">login</a>
+        <a href="/register">register</a>
+      {% endif %}
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}

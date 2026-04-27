@@ -42,6 +42,89 @@ nav { display: flex; gap: 1rem; }
 nav a { color: var(--muted); text-decoration: none; }
 nav a:hover { color: var(--fg); }
 
+.auth-status {
+  margin-left: auto;
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+.auth-status a { color: var(--accent); text-decoration: none; }
+.auth-status a:hover { text-decoration: underline; }
+.auth-nick { color: var(--fg); font-weight: 600; }
+.auth-logout {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.auth-logout:hover { color: var(--accent); }
+
+/* Auth forms */
+.auth-form {
+  max-width: 420px;
+  margin: 2rem auto;
+  background: white;
+  padding: 2rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.auth-form h1 { margin: 0 0 0.5rem; font-size: 1.4rem; }
+.auth-help { color: var(--muted); font-size: 0.9rem; margin-top: 0; }
+.auth-error {
+  background: #fdecec;
+  color: #b71c1c;
+  padding: 0.6rem 0.9rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  border: 1px solid #f8c7c7;
+}
+.auth-form form { display: flex; flex-direction: column; gap: 0.9rem; }
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.auth-form input[type=text],
+.auth-form input[type=password] {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 1rem;
+  color: var(--fg);
+  background: white;
+}
+.auth-claim {
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 0.5rem !important;
+  font-size: 0.85rem;
+  color: var(--fg);
+  line-height: 1.4;
+}
+.auth-form button[type=submit] {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  padding: 0.6rem 1rem;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-top: 0.4rem;
+}
+.auth-alt {
+  margin-top: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
+.auth-alt a { color: var(--accent); text-decoration: none; }
+
 main {
   max-width: 1100px;
   margin: 0 auto;
