@@ -32,14 +32,18 @@ Highlights are round-specific — the 1AC read is long, the 2AC extension is six
 - ✅ "Find evidence that answers this card →" button on card detail. Claude Haiku generates the inverse claim of the card's tag, embeds it, vector-searches the corpus, returns the top 8 closest cards (`src/debatabase/answer_finder.py`). Requires both `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY`; the button is hidden otherwise.
 - ✅ Claude-assisted tagging (`src/debatabase/tagger.py`). On `bulk.py` ingest, when `ANTHROPIC_API_KEY` is set, each card's tag + body are sent to Haiku with the controlled vocabulary; output is constrained to existing slugs and lands in `card_content_tags` with `status='proposed'` (admin promotes to 'approved' later — currently via SQL, no admin UI yet). Falls back to legacy `KEYWORD_RULES` when no key. Retroactive script `scripts/retag_cards.py` runs the same flow over the existing corpus.
 
-## 4. Duplicate / near-duplicate clustering
+## 4. Duplicate / near-duplicate clustering ✅ shipped
 
-Camp files repeat the same articles with different cuts. The data model should treat one article as one `source` with many cuts attached, not as N sibling cards.
+Camp files repeat the same articles with different cuts. Without dedup the corpus accumulates 5–7 copies of the same Mearsheimer / Mbembe / Lamble cuts and they pollute search results.
 
-- Near-duplicate detection at ingest: hash + embedding similarity over `card_text` against existing cards.
-- When a match is found, attach as a new cut of the existing source rather than inserting a new source.
-- Card detail shows "N cuts of this article" with each cutter's highlight; allow merging or picking a canonical cut.
-- Backfill pass over the current corpus to collapse existing duplicates.
+**Status:** shipped. The seed corpus has 440 near-duplicate clusters at the default threshold; the worst clusters are 6–7 copies of identical cuts.
+
+- ✅ `cards.canonical_card_id` (nullable FK to `cards.id`). NULL = canonical / standalone; set = "I'm a duplicate, point at the canonical."
+- ✅ Clustering via embedding cosine distance + union-find (`src/debatabase/dedup.py`). Default threshold 0.08; HNSW index makes the per-card K-NN lookup fast (~3s for the full 3k-card corpus).
+- ✅ `/admin/duplicates` review UI: lists clusters by descending size, radio-pick the canonical per cluster, one-click sets `canonical_card_id` on the rest.
+- ✅ Search and `/cards/{id}/answers` filter `canonical_card_id IS NULL` so duplicates disappear from results once a canonical is picked.
+
+Not yet (deferred): per-source duplicate detection at ingest time (right now it's purely retroactive); a "merge the markup spans" action that combines multiple cutters' highlights into one canonical card. Both are nice-to-haves, not blockers.
 
 ## 5. Opencaselist wiki scraper
 

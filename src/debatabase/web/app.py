@@ -34,6 +34,7 @@ from debatabase.auth import (
 )
 from debatabase.config import settings
 from debatabase.db import session_scope
+from debatabase.dedup import find_clusters
 from debatabase.answer_finder import (
     generate_inverse_claim,
     has_inverse_capability,
@@ -359,8 +360,9 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
         # Base card-fetch query
         params: dict = {}
 
-        # Build WHERE clauses for cards
-        where_clauses = []
+        # Build WHERE clauses for cards. Non-canonical (duplicate)
+        # cards never surface in search — see /admin/duplicates.
+        where_clauses = [sqltext("cards.canonical_card_id IS NULL")]
         if q:
             # tsvector match OR substring match against author_last/cite_short.
             # When semantic is on, also include cards whose embedding is
@@ -612,7 +614,9 @@ def card_answers(request: Request, card_id: int):
                        (cards.embedding <=> CAST(:qvec AS vector)) AS distance
                 FROM cards
                 JOIN sources ON sources.id = cards.source_id
-                WHERE cards.embedding IS NOT NULL AND cards.id != :exclude_id
+                WHERE cards.embedding IS NOT NULL
+                  AND cards.id != :exclude_id
+                  AND cards.canonical_card_id IS NULL
                 ORDER BY cards.embedding <=> CAST(:qvec AS vector) ASC
                 LIMIT :limit
             """),
@@ -627,6 +631,165 @@ def card_answers(request: Request, card_id: int):
         request,
         "_card_answers.html",
         {"inverse": inverse, "rows": rows, "source_card_id": card_id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Admin: proposed-tag review (PR 7a)
+#
+# Claude-driven tagging (#3 / tagger.py) inserts content_tag links with
+# status='proposed'. This page lets the user audit those proposals,
+# grouped by content_tag (the auditable axis — "is Claude over-proposing
+# co-optation?"). One-click promote to 'approved' or delete entirely.
+#
+# Login-gated only — no separate admin role yet; this is a personal tool.
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/proposed-tags", response_class=HTMLResponse)
+def proposed_tags_index(
+    request: Request, _user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        rows = s.execute(
+            sqltext("""
+                SELECT ct.id AS tag_id, ct.slug, ct.label,
+                       c.id AS card_id, c.tag AS card_tag, c.card_text,
+                       sources.cite_short
+                FROM card_content_tags cct
+                JOIN content_tags ct ON ct.id = cct.content_tag_id
+                JOIN cards c ON c.id = cct.card_id
+                JOIN sources ON sources.id = c.source_id
+                WHERE cct.status = 'proposed'
+                ORDER BY ct.slug, c.id
+            """)
+        ).all()
+    # Group by tag
+    groups: list[dict] = []
+    current_tag_id: int | None = None
+    for r in rows:
+        if r.tag_id != current_tag_id:
+            groups.append(
+                {
+                    "tag_id": r.tag_id,
+                    "slug": r.slug,
+                    "label": r.label,
+                    "cards": [],
+                }
+            )
+            current_tag_id = r.tag_id
+        groups[-1]["cards"].append(
+            {
+                "card_id": r.card_id,
+                "card_tag": r.card_tag,
+                "card_snippet": (r.card_text or "")[:200],
+                "cite_short": r.cite_short,
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "proposed_tags.html",
+        {"groups": groups, "total": len(rows)},
+    )
+
+
+@app.post(
+    "/admin/proposed-tags/{card_id}/{tag_id}/approve",
+    response_class=HTMLResponse,
+)
+def approve_proposed_tag(
+    card_id: int, tag_id: int, _user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        s.execute(
+            sqltext("""
+                UPDATE card_content_tags
+                SET status = 'approved'
+                WHERE card_id = :cid AND content_tag_id = :tid
+                  AND status = 'proposed'
+            """),
+            {"cid": card_id, "tid": tag_id},
+        )
+    return HTMLResponse('<span class="proposed-action-ok">approved</span>')
+
+
+@app.delete(
+    "/admin/proposed-tags/{card_id}/{tag_id}", response_class=HTMLResponse
+)
+def reject_proposed_tag(
+    card_id: int, tag_id: int, _user_id: int = Depends(get_current_user_id)
+):
+    with session_scope() as s:
+        s.execute(
+            sqltext("""
+                DELETE FROM card_content_tags
+                WHERE card_id = :cid AND content_tag_id = :tid
+                  AND status = 'proposed'
+            """),
+            {"cid": card_id, "tid": tag_id},
+        )
+    return HTMLResponse('<span class="proposed-action-ok">rejected</span>')
+
+
+# ---------------------------------------------------------------------------
+# Admin: duplicate-card review (PR 7b, FEATURE_ADDITIONS.md #4)
+#
+# Surfaces clusters of near-duplicate cards detected via embedding
+# cosine distance. The user picks a canonical per cluster; the others
+# get cards.canonical_card_id pointed at it and are filtered out of
+# /search and /cards/{id}/answers (canonical_card_id IS NULL).
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/duplicates", response_class=HTMLResponse)
+def duplicates_index(
+    request: Request,
+    threshold: float = Query(default=0.08, ge=0.0, le=0.5),
+    _user_id: int = Depends(get_current_user_id),
+):
+    with session_scope() as s:
+        clusters = find_clusters(s, threshold=threshold)
+    return templates.TemplateResponse(
+        request,
+        "duplicates.html",
+        {"clusters": clusters, "threshold": threshold},
+    )
+
+
+@app.post("/admin/duplicates/canonical", response_class=HTMLResponse)
+def set_canonical(
+    request: Request,
+    canonical_id: int = Form(...),
+    member_ids: str = Form(...),  # comma-separated card_ids in the cluster
+    _user_id: int = Depends(get_current_user_id),
+):
+    """Mark every member except `canonical_id` as a duplicate of it."""
+    try:
+        ids = [int(x) for x in member_ids.split(",") if x.strip()]
+    except ValueError:
+        return HTMLResponse("invalid member_ids", status_code=400)
+    if canonical_id not in ids:
+        return HTMLResponse(
+            "canonical_id must be one of member_ids", status_code=400
+        )
+    others = [i for i in ids if i != canonical_id]
+    with session_scope() as s:
+        s.execute(
+            sqltext("""
+                UPDATE cards
+                SET canonical_card_id = :canon
+                WHERE id = ANY(:others)
+            """),
+            {"canon": canonical_id, "others": others},
+        )
+        # Also: ensure the canonical is itself NOT marked as a duplicate.
+        s.execute(
+            sqltext(
+                "UPDATE cards SET canonical_card_id = NULL WHERE id = :id"
+            ),
+            {"id": canonical_id},
+        )
+    return HTMLResponse(
+        f'<span class="proposed-action-ok">canonical set to '
+        f'card #{canonical_id} ({len(others)} hidden)</span>'
     )
 
 

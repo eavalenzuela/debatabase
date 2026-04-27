@@ -252,6 +252,144 @@ input[type=search] {
 }
 .answers-error { color: #b71c1c; }
 
+/* Proposed-tag review */
+.proposed-tags h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
+.proposed-summary { color: var(--muted); margin-bottom: 1.2rem; }
+.proposed-group {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+.proposed-group > summary {
+  cursor: pointer;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  list-style: none;
+}
+.proposed-group > summary code {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+.proposed-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.proposed-list { list-style: none; padding: 0; margin: 0; }
+.proposed-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid var(--border);
+  align-items: start;
+}
+.proposed-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.proposed-approve,
+.proposed-reject {
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  background: white;
+}
+.proposed-approve { border: 1px solid #2e7d32; color: #2e7d32; }
+.proposed-approve:hover { background: #e8f5e9; }
+.proposed-reject { border: 1px solid #b71c1c; color: #b71c1c; }
+.proposed-reject:hover { background: #fdecec; }
+.proposed-action-ok { color: #2e7d32; font-style: italic; }
+
+/* Duplicates review */
+.duplicates h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
+.dup-threshold {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0 0 1rem;
+}
+.dup-threshold input[type=number] {
+  width: 5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.dup-threshold button {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  padding: 0.3rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.dup-help { color: var(--muted); font-size: 0.85rem; }
+.dup-summary { color: var(--muted); margin-bottom: 1.2rem; }
+.dup-cluster {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 0.8rem;
+}
+.dup-cluster-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+.dup-size {
+  background: var(--accent);
+  color: white;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+}
+.dup-list { list-style: none; padding: 0; margin: 0 0 0.6rem; }
+.dup-row { padding: 0.35rem 0; border-bottom: 1px dashed var(--border); }
+.dup-row:last-child { border-bottom: 0; }
+.dup-row label {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.6rem;
+  align-items: baseline;
+  cursor: pointer;
+}
+.dup-row .cite { color: var(--muted); font-size: 0.85rem; }
+.dup-row .tag-text {
+  font-weight: 500;
+  margin: 0;
+}
+.dup-row .tag-text a { color: var(--fg); text-decoration: none; }
+.dup-row .tag-text a:hover { color: var(--accent); }
+.dup-actions { display: flex; gap: 0.7rem; align-items: baseline; }
+.dup-set {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  padding: 0.35rem 0.9rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.dup-status { color: var(--muted); font-size: 0.85rem; }
+
 .semantic-badge {
   display: inline-block;
   background: var(--accent);

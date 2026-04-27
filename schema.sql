@@ -54,12 +54,20 @@ CREATE TABLE cards (
     -- scripts/backfill_embeddings.py (requires VOYAGE_API_KEY).
     -- Dimension matches voyage-3-lite (512). Search blends this with
     -- search_tsv when populated; falls back to tsvector-only otherwise.
-    embedding       vector(512)
+    embedding       vector(512),
+    -- Dedup: when set, this card has been marked as a duplicate of the
+    -- referenced canonical card. Search and answer-finder filter
+    -- non-canonical rows out (canonical_card_id IS NOT NULL means
+    -- "hidden duplicate"). Set via /admin/duplicates. Self-reference
+    -- is intentionally not used — canonicals have NULL here.
+    canonical_card_id BIGINT REFERENCES cards(id) ON DELETE SET NULL
 );
 CREATE INDEX cards_search_tsv_idx ON cards USING GIN (search_tsv);
 CREATE INDEX cards_source_id_idx ON cards (source_id);
 CREATE INDEX cards_tag_trgm_idx ON cards USING GIN (tag gin_trgm_ops);
 CREATE INDEX cards_embedding_hnsw_idx ON cards USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX cards_canonical_idx ON cards (canonical_card_id)
+    WHERE canonical_card_id IS NOT NULL;
 
 -- Controlled vocabulary of argument-type tags. Grown collaboratively
 -- (admin approves each one); never auto-created at ingest time.

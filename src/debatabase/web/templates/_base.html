@@ -16,6 +16,8 @@
       <a href="/analyticals">Analyticals</a>
       {% if request.session.get('user_id') %}
         <a href="/workspaces">Workspaces</a>
+        <a href="/admin/proposed-tags">Review</a>
+        <a href="/admin/duplicates">Duplicates</a>
       {% endif %}
     </nav>
     <div class="auth-status">

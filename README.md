@@ -17,6 +17,8 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - **In-browser re-highlighting** — select text in a card body inside a workspace and click highlight / underline / clear. Edits are stored as a workspace-scoped **card variant**; the canonical card is never mutated and global card detail / search continue to show the original. Revert any time.
   - **Find evidence that answers this card** — on card detail (when `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are both set), Claude Haiku rewrites the card's tag as the strongest opposing claim, then vector-searches the corpus for cards closest to that inverse — surfacing the cuts most likely to answer this one.
   - **Claude-assisted tagging** — bulk ingest sends each card to Haiku with the existing `content_tags` vocabulary; output is constrained to known slugs and lands as `status='proposed'` so an admin can promote. `scripts/retag_cards.py` runs the same flow over the existing corpus.
+  - **Proposed-tag review** — `/admin/proposed-tags` (login-gated) groups every proposed link by tag with one-click approve / reject.
+  - **Duplicate detection** — `/admin/duplicates` (login-gated) clusters near-duplicate cards by embedding cosine distance and lets you pick a canonical per cluster; non-canonicals get hidden from search and from "answers this card" results.
   - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
 - **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,996 cards, 88 analyticals, 2,139 sources, 86 content tags, drawn from ~75 source documents).
 
@@ -74,6 +76,7 @@ src/debatabase/
   embeddings.py                     Voyage AI client wrapper (semantic search)
   answer_finder.py                  Claude-driven inverse-claim generator
   tagger.py                         Claude-driven content-tag proposer
+  dedup.py                          near-duplicate clustering via embeddings
   web/
     app.py                          FastAPI routes
     render.py                       markup-span → HTML rendering (full/highlight-only/etc.)

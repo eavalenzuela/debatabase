@@ -1,0 +1,59 @@
+{% extends "_base.html" %}
+{% block title %}Duplicate cards · debatabase{% endblock %}
+{% block content %}
+<section class="duplicates">
+  <h1>Duplicate cards</h1>
+  <form method="get" action="/admin/duplicates" class="dup-threshold">
+    <label>
+      cosine-distance threshold
+      <input type="number" name="threshold" value="{{ threshold }}"
+             min="0" max="0.5" step="0.01">
+    </label>
+    <button type="submit">re-scan</button>
+    <span class="dup-help">
+      lower = stricter. 0.05–0.10 is the typical near-duplicate range.
+    </span>
+  </form>
+
+  <p class="dup-summary">
+    {{ clusters|length }} cluster{{ '' if clusters|length == 1 else 's' }} found.
+  </p>
+
+  {% if not clusters %}
+    <p class="empty">No near-duplicate clusters at this threshold.</p>
+  {% endif %}
+
+  {% for cluster in clusters %}
+    <form class="dup-cluster"
+          hx-post="/admin/duplicates/canonical"
+          hx-target="closest .dup-cluster .dup-status"
+          hx-swap="innerHTML">
+      <input type="hidden" name="member_ids"
+             value="{{ cluster|map(attribute='card_id')|join(',') }}">
+      <div class="dup-cluster-header">
+        <span class="dup-size">{{ cluster|length }} cards</span>
+        <span class="dup-help">pick the canonical — others get hidden from search</span>
+      </div>
+      <ul class="dup-list">
+        {% for c in cluster %}
+          <li class="dup-row">
+            <label>
+              <input type="radio" name="canonical_id" value="{{ c.card_id }}" required>
+              <span class="cite">
+                <a href="/sources/{{ c.source_id }}">{{ c.cite_short }}</a> · #{{ c.card_id }}
+              </span>
+              <span class="tag-text">
+                <a href="/cards/{{ c.card_id }}">{{ c.tag }}</a>
+              </span>
+            </label>
+          </li>
+        {% endfor %}
+      </ul>
+      <div class="dup-actions">
+        <button type="submit" class="dup-set">set canonical</button>
+        <span class="dup-status"></span>
+      </div>
+    </form>
+  {% endfor %}
+</section>
+{% endblock %}

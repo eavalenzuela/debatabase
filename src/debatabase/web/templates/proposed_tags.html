@@ -1,0 +1,53 @@
+{% extends "_base.html" %}
+{% block title %}Proposed tags · debatabase{% endblock %}
+{% block content %}
+<section class="proposed-tags">
+  <h1>Proposed tags</h1>
+  <p class="proposed-summary">
+    {{ total }} proposed tag link{{ '' if total == 1 else 's' }} across
+    {{ groups|length }} tag{{ '' if groups|length == 1 else 's' }}.
+    Approve to promote (so it counts in the tag chips and search filters);
+    reject to drop the row entirely.
+  </p>
+
+  {% if not groups %}
+    <p class="empty">Nothing pending.</p>
+  {% endif %}
+
+  {% for g in groups %}
+    <details class="proposed-group" open>
+      <summary>
+        <code>{{ g.slug }}</code> · {{ g.label }}
+        <span class="proposed-count">{{ g.cards|length }}</span>
+      </summary>
+      <ul class="proposed-list">
+        {% for c in g.cards %}
+          <li class="proposed-row" id="proposed-{{ g.tag_id }}-{{ c.card_id }}">
+            <div class="proposed-card">
+              <div class="cite">
+                <a href="/cards/{{ c.card_id }}">{{ c.cite_short }}</a>
+              </div>
+              <div class="tag-text">{{ c.card_tag }}</div>
+              <div class="snippet">{{ c.card_snippet }}{% if c.card_snippet|length >= 200 %}…{% endif %}</div>
+            </div>
+            <div class="proposed-actions">
+              <form hx-post="/admin/proposed-tags/{{ c.card_id }}/{{ g.tag_id }}/approve"
+                    hx-target="closest .proposed-actions"
+                    hx-swap="innerHTML"
+                    style="display:inline">
+                <button type="submit" class="proposed-approve">approve</button>
+              </form>
+              <form hx-delete="/admin/proposed-tags/{{ c.card_id }}/{{ g.tag_id }}"
+                    hx-target="closest .proposed-actions"
+                    hx-swap="innerHTML"
+                    style="display:inline">
+                <button type="submit" class="proposed-reject">reject</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endfor %}
+</section>
+{% endblock %}

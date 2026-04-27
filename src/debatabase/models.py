@@ -55,6 +55,9 @@ class Card(Base):
     block_path: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    canonical_card_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("cards.id")
+    )
 
     source: Mapped[Source] = relationship(back_populates="cards")
     content_tag_links: Mapped[list["CardContentTag"]] = relationship(
