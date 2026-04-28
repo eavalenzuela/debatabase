@@ -2,6 +2,8 @@
 
 A searchable database of policy debate evidence cards. Built to make a personal collection of `.docx` evidence files browseable, taggable, and quickly searchable — including by author, by argument, or by full body text — with the underline/highlight distinctions that debaters care about preserved end-to-end. From there it's a prep tool: assemble cards into named speech-doc workspaces, re-highlight a card per round without touching the canonical version, and export the result back to `.docx` ready to read in Verbatim.
 
+#### Live instance at [debate.eevn.io](http://debate.eevn.io/).
+
 ## What's in here
 
 - **Postgres schema** — `sources`, `cards`, `analyticals`, an admin-curated `content_tags` vocabulary, plus join tables for both. `users` / `workspaces` / `workspace_entries` / `card_variants` for the prep side. Full-text search via `tsvector`; semantic search via `pgvector` (HNSW index on a `vector(512)` column); tag hierarchy via `parent_id`.
