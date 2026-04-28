@@ -24,3 +24,15 @@ example_card_01.txt
 
 # OS
 .DS_Store
+
+# Seed dump regenerations are local backups, not for git. The currently
+# committed db_seed.sql is left as-is (small enough to be useful for
+# testing / fresh installs of the personal corpus). Full-corpus seeds
+# including wiki ingest land outside the repo (per-clone backups via
+# pg_dump). `git update-index --skip-worktree db_seed.sql` is also set
+# so local regenerations don't show up in git status.
+db_seed.sql
+
+# SSH keys for AWS / EC2 deployment (per-developer, never committed).
+*.pem
+*.key
