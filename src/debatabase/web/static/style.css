@@ -209,6 +209,26 @@ input[type=search] {
 .htmx-indicator.htmx-request,
 .htmx-request .htmx-indicator { display: inline; }
 
+.search-indicator { display: none; align-items: center; gap: 0.4rem; }
+.search-indicator.htmx-request,
+.htmx-request .search-indicator { display: inline-flex; }
+
+.spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spinner-rotate 0.7s linear infinite;
+}
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
+
 .answers-panel {
   margin-top: 1rem;
   background: white;

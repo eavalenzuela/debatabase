@@ -13,12 +13,18 @@
         hx-target="#results"
         hx-push-url="true"
         hx-trigger="input changed delay:250ms from:input[name='q'], submit"
+        hx-sync="this:replace"
+        hx-indicator="#search-indicator"
       >
         <input
           type="search" name="q" placeholder="Search tag, body, author, cite…"
           value="{{ q }}" autofocus autocomplete="off"
         >
         <input type="hidden" name="tag" value="{{ tag }}">
+        <span id="search-indicator" class="htmx-indicator search-indicator" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="search-indicator-text">searching…</span>
+        </span>
         {% if tag %}
           <span class="active-filter">tag: <code>{{ tag }}</code> <a href="/search?q={{ q }}">×</a></span>
         {% endif %}
