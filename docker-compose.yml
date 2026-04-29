@@ -7,7 +7,9 @@ services:
       POSTGRES_PASSWORD: debatabase
       POSTGRES_DB: debatabase
     ports:
-      - "5433:5432"
+      # Bind to loopback only — never expose Postgres to the host's
+      # external interface. The app talks to the DB over this hop.
+      - "127.0.0.1:5433:5432"
     volumes:
       - ./.pgdata:/var/lib/postgresql/data
       - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro

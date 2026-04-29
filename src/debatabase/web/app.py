@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import re
+from html import escape as html_escape
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -34,6 +35,14 @@ from debatabase.auth import (
 )
 from debatabase.config import settings
 from debatabase.db import session_scope
+from debatabase.rate_limit import (
+    answers_rate_limit,
+    check as check_rate_limit,
+    login_rate_limit,
+    register_rate_limit,
+    SEARCH_BURST,
+    SEARCH_HOURLY,
+)
 from debatabase.dedup import find_clusters
 from debatabase.answer_finder import (
     generate_inverse_claim,
@@ -109,7 +118,24 @@ async def _require_login(request: Request, call_next):
 # We need SessionMiddleware to be outermost so request.session is set up
 # by the time _require_login (inner) reads it.
 app.add_middleware(BaseHTTPMiddleware, dispatch=_require_login)
-app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
+# Cookie hardening:
+#   - HttpOnly is on by default (Starlette).
+#   - SameSite=lax blocks the CSRF cases we care about (cross-site form
+#     POST, fetch with credentials) without breaking the top-level
+#     navigation we use after login.
+#   - https_only is gated on env so local http dev still works; in
+#     production the cookie is only sent over TLS.
+#   - max_age caps idle session length at ~30 days; absent it, the
+#     cookie is a session cookie that ends with the browser, which is
+#     fine but inconsistent across users.
+_PROD = settings.env.lower() in ("prod", "production")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    same_site="lax",
+    https_only=_PROD,
+    max_age=60 * 60 * 24 * 30,
+)
 app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
 
 
@@ -124,6 +150,24 @@ def get_current_user_id(request: Request) -> int:
     if uid is None:
         raise HTTPException(status_code=401, detail="login required")
     return uid
+
+
+def _safe_next(raw: str | None, default: str = "/workspaces") -> str:
+    """Reject open-redirect targets in the ``next`` param.
+
+    Only allow same-origin, single-segment paths starting with ``/``.
+    Strip protocol-relative ``//evil.com`` and absolute URLs.
+    """
+    if not raw:
+        return default
+    if not raw.startswith("/"):
+        return default
+    # Protocol-relative and back-slash variants both get parsed as
+    # cross-origin by some browsers; reject both forms outright.
+    if raw.startswith("//") or raw.startswith("/\\"):
+        return default
+    return raw
+
 
 PAGE_SIZE = 50
 
@@ -174,34 +218,36 @@ def _tag_tree(session) -> list[dict]:
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = Query(default="/workspaces")):
+    safe = _safe_next(next)
     if "user_id" in request.session:
-        return RedirectResponse(next, status_code=303)
+        return RedirectResponse(safe, status_code=303)
     return templates.TemplateResponse(
-        request, "login.html", {"next": next, "error": None}
+        request, "login.html", {"next": safe, "error": None}
     )
 
 
-@app.post("/login", response_class=HTMLResponse)
+@app.post("/login", response_class=HTMLResponse, dependencies=[Depends(login_rate_limit)])
 def login_submit(
     request: Request,
     nickname: str = Form(...),
     password: str = Form(...),
     next: str = Form(default="/workspaces"),
 ):
+    safe = _safe_next(next)
     with session_scope() as s:
         user = s.scalar(select(User).where(User.nickname == nickname.strip()))
         if user is None or not verify_password(user.pw_hash, password):
             return templates.TemplateResponse(
                 request,
                 "login.html",
-                {"next": next, "error": "invalid nickname or password"},
+                {"next": safe, "error": "invalid nickname or password"},
                 status_code=401,
             )
         user_id = user.id
         user_nick = user.nickname
     request.session["user_id"] = user_id
     request.session["user_nick"] = user_nick
-    return RedirectResponse(next or "/workspaces", status_code=303)
+    return RedirectResponse(safe, status_code=303)
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -225,7 +271,7 @@ def register_page(request: Request):
     )
 
 
-@app.post("/register", response_class=HTMLResponse)
+@app.post("/register", response_class=HTMLResponse, dependencies=[Depends(register_rate_limit)])
 def register_submit(
     request: Request,
     nickname: str = Form(...),
@@ -331,6 +377,12 @@ def search(
     tag: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
 ):
+    # Only charge the rate-limit when there's a query string to embed —
+    # tag-only browsing and the empty home view don't call Voyage.
+    if q:
+        check_rate_limit(
+            request, SEARCH_BURST, SEARCH_HOURLY, prefix="search"
+        )
     return _search(request, q=q, tag=tag, page=page)
 
 
@@ -580,7 +632,11 @@ def card_detail(
 ANSWERS_LIMIT = 8
 
 
-@app.get("/cards/{card_id}/answers", response_class=HTMLResponse)
+@app.get(
+    "/cards/{card_id}/answers",
+    response_class=HTMLResponse,
+    dependencies=[Depends(answers_rate_limit)],
+)
 def card_answers(request: Request, card_id: int):
     """Generate the inverse claim of `card_id`'s tag, then vector-search."""
     if not has_inverse_capability() or not has_embedding_key():
@@ -601,7 +657,7 @@ def card_answers(request: Request, card_id: int):
     except Exception as e:
         return HTMLResponse(
             f'<p class="answers-error">inverse-claim generation failed: '
-            f'{type(e).__name__}</p>',
+            f'{html_escape(type(e).__name__)}</p>',
             status_code=502,
         )
     try:
@@ -609,7 +665,7 @@ def card_answers(request: Request, card_id: int):
     except Exception as e:
         return HTMLResponse(
             f'<p class="answers-error">embedding failed: '
-            f'{type(e).__name__}</p>',
+            f'{html_escape(type(e).__name__)}</p>',
             status_code=502,
         )
 
@@ -1093,7 +1149,7 @@ def rename_workspace(
         if ws is None:
             return HTMLResponse("not found", status_code=404)
         ws.name = name
-    return HTMLResponse(name)
+    return HTMLResponse(html_escape(name))
 
 
 @app.delete("/workspaces/{ws_id}", response_class=HTMLResponse)
@@ -1163,7 +1219,7 @@ def add_workspace_entry(
         s.add(entry)
         ws_name = ws.name
     return HTMLResponse(
-        f'<span class="ws-added">added to <em>{ws_name}</em> · '
+        f'<span class="ws-added">added to <em>{html_escape(ws_name)}</em> · '
         f'<a href="/workspaces/{ws_id}">view</a></span>'
     )
 

@@ -36,3 +36,7 @@ db_seed.sql
 # SSH keys for AWS / EC2 deployment (per-developer, never committed).
 *.pem
 *.key
+
+# Cloudflare origin private key (no extension, slips past *.pem/*.key)
+eevn_priv_key
+eevn_origin.pem
