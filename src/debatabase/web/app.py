@@ -802,18 +802,35 @@ def reject_proposed_tag(
 # /search and /cards/{id}/answers (canonical_card_id IS NULL).
 # ---------------------------------------------------------------------------
 
+DUPLICATES_PAGE_SIZE = 25
+
+
 @app.get("/admin/duplicates", response_class=HTMLResponse)
 def duplicates_index(
     request: Request,
     threshold: float = Query(default=0.08, ge=0.0, le=0.5),
+    page: int = Query(default=1, ge=1),
     _user_id: int = Depends(get_current_user_id),
 ):
     with session_scope() as s:
-        clusters = find_clusters(s, threshold=threshold)
+        all_clusters = find_clusters(s, threshold=threshold)
+    total_clusters = len(all_clusters)
+    total_pages = max(1, (total_clusters + DUPLICATES_PAGE_SIZE - 1) // DUPLICATES_PAGE_SIZE)
+    page = min(page, total_pages)
+    offset = (page - 1) * DUPLICATES_PAGE_SIZE
+    clusters = all_clusters[offset : offset + DUPLICATES_PAGE_SIZE]
     return templates.TemplateResponse(
         request,
         "duplicates.html",
-        {"clusters": clusters, "threshold": threshold},
+        {
+            "clusters": clusters,
+            "threshold": threshold,
+            "page": page,
+            "total_pages": total_pages,
+            "total_clusters": total_clusters,
+            "start_idx": offset + 1 if clusters else 0,
+            "end_idx": offset + len(clusters),
+        },
     )
 
 

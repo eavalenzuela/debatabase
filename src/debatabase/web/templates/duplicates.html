@@ -15,9 +15,22 @@
     </span>
   </form>
 
-  <p class="dup-summary">
-    {{ clusters|length }} cluster{{ '' if clusters|length == 1 else 's' }} found.
-  </p>
+  <div class="dup-summary-row">
+    <p class="dup-summary">
+      {{ total_clusters }} cluster{{ '' if total_clusters == 1 else 's' }} found{% if total_clusters %} — showing {{ start_idx }}–{{ end_idx }}{% endif %}.
+    </p>
+    {% if total_pages > 1 %}
+      <nav class="pagination">
+        {% if page > 1 %}
+          <a href="/admin/duplicates?threshold={{ threshold }}&amp;page={{ page - 1 }}">‹ prev</a>
+        {% endif %}
+        <span>page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}
+          <a href="/admin/duplicates?threshold={{ threshold }}&amp;page={{ page + 1 }}">next ›</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </div>
 
   {% if not clusters %}
     <p class="empty">No near-duplicate clusters at this threshold.</p>
@@ -55,5 +68,17 @@
       </div>
     </form>
   {% endfor %}
+
+  {% if total_pages > 1 %}
+    <nav class="pagination">
+      {% if page > 1 %}
+        <a href="/admin/duplicates?threshold={{ threshold }}&amp;page={{ page - 1 }}">‹ prev</a>
+      {% endif %}
+      <span>page {{ page }} of {{ total_pages }}</span>
+      {% if page < total_pages %}
+        <a href="/admin/duplicates?threshold={{ threshold }}&amp;page={{ page + 1 }}">next ›</a>
+      {% endif %}
+    </nav>
+  {% endif %}
 </section>
 {% endblock %}
