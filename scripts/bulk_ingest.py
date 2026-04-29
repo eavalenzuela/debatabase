@@ -94,7 +94,11 @@ def main() -> None:
         try:
             jsonl_path = EXTRACTED_ROOT / (fp.stem.replace(" ", "_") + ".jsonl")
             with session_scope() as s:
-                stats = ingest_docx(fp, s, save_jsonl_to=jsonl_path)
+                # Raw-only ingest. Claude tagging is run separately via
+                # scripts/batched_retag.py (cached batches, ~10x cheaper
+                # than per-card calls at this corpus scale).
+                stats = ingest_docx(fp, s, save_jsonl_to=jsonl_path,
+                                    use_claude_tagger=False)
             ca = stats["cards_added"]
             an = stats["analyticals_added"]
             new_tags = stats["new_tag_slugs"]
