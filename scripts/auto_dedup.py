@@ -57,7 +57,11 @@ from typing import Any
 from sqlalchemy import text as sqltext
 
 from debatabase.db import session_scope
-from debatabase.dedup import find_clusters, DEFAULT_THRESHOLD
+from debatabase.dedup import (
+    ClusterMember,
+    DEFAULT_THRESHOLD,
+    find_clusters,
+)
 
 
 # Tunables — keep close to the documented defaults so the dry-run JSON
@@ -228,6 +232,29 @@ def jaccard(a: list[dict] | None, b: list[dict] | None) -> float:
     return inter / union if union else 1.0
 
 
+def markup_covers(winner: list[dict] | None, loser: list[dict] | None) -> bool:
+    """True iff every loser span is fully contained inside some winner span
+    of the same kind. Used as a markup-Jaccard bypass: if winner is a
+    strict-or-equal superset of loser's markup, the loser is a less-cut
+    version of the winner — safe to canonicalize, since the winner shows
+    everything the loser does (and the loser remains accessible via the
+    alt-cuts sidebar).
+    """
+    if not loser:
+        return True  # nothing to cover
+    if not winner:
+        return False  # winner has no markup but loser does
+    by_kind: dict[str, list[tuple[int, int]]] = {}
+    for s in winner:
+        by_kind.setdefault(s["kind"], []).append((s["start"], s["end"]))
+    for ls in loser:
+        spans = by_kind.get(ls["kind"], [])
+        ls_start, ls_end = ls["start"], ls["end"]
+        if not any(ws_start <= ls_start and ws_end >= ls_end for ws_start, ws_end in spans):
+            return False
+    return True
+
+
 _STOPWORDS = frozenset(
     "a an the and or of for to in on at is are was were be been being "
     "this that these those it its their they them as but by with not no".split()
@@ -267,6 +294,38 @@ class CardScore:
     cite_score: float
     prov_bonus: float
     reasons: list[str]
+
+
+def find_source_clusters(session) -> list[list[ClusterMember]]:
+    """Coarse clusters by source_id, not embedding distance.
+
+    For each source with >= 2 still-canonical (non-deduped) cards,
+    emit one cluster. The two-stage tag-token sub-clustering done
+    downstream then partitions each source's cards into argument-
+    coherent groups. Catches dedup pairs the embedding scan missed
+    because their bodies didn't quite cross the cosine threshold
+    (typos, paragraph breaks, slightly different boilerplate).
+    """
+    rows = session.execute(sqltext("""
+        SELECT c.id, c.tag, c.source_id, s.cite_short
+        FROM cards c
+        JOIN sources s ON s.id = c.source_id
+        WHERE c.canonical_card_id IS NULL
+          AND NOT c.dedup_excluded
+        ORDER BY c.source_id, c.id
+    """)).all()
+
+    by_source: dict[int, list[ClusterMember]] = {}
+    for r in rows:
+        by_source.setdefault(r.source_id, []).append(
+            ClusterMember(
+                card_id=r.id, tag=r.tag, cite_short=r.cite_short,
+                source_id=r.source_id,
+            )
+        )
+    clusters = [g for g in by_source.values() if len(g) >= 2]
+    clusters.sort(key=lambda c: -len(c))
+    return clusters
 
 
 def hydrate_cluster(session, member_ids: list[int]) -> list[dict[str, Any]]:
@@ -371,6 +430,15 @@ def decide_subcluster(
     ]
     min_markup_jaccard = min(markup_jaccards) if markup_jaccards else 1.0
 
+    # Markup-superset shortcut: if winner's markup covers every loser's
+    # markup (loser spans are subsets of winner spans), apply even when
+    # Jaccard is below floor. Loser is a "less-cut" version; winner
+    # already shows everything it does.
+    winner_covers_all = all(
+        markup_covers(by_id[winner.card_id]["markup"], by_id[c.card_id]["markup"])
+        for c in losers
+    )
+
     tag_jaccards = [tag_token_jaccard(winner.tag, c.tag) for c in losers]
     min_tag_jaccard = min(tag_jaccards) if tag_jaccards else 1.0
     max_tag_jaccard = max(tag_jaccards) if tag_jaccards else 1.0
@@ -404,11 +472,11 @@ def decide_subcluster(
             f"margin too tight ({margin:.2f} < {MARGIN_FACTOR}) and "
             f"winner score {winner.score} < good-enough floor {GOOD_ENOUGH_FLOOR}"
         )
-    elif min_markup_jaccard < markup_floor:
+    elif min_markup_jaccard < markup_floor and not winner_covers_all:
         decision = "skip"
         skip_reason = (
             f"markup Jaccard {min_markup_jaccard:.2f} < {markup_floor} "
-            f"(tag_tight={tag_tight})"
+            f"(tag_tight={tag_tight}) and winner does not cover loser markup"
         )
     elif min_tag_jaccard < TAG_TOKEN_JACCARD_FLOOR:
         # Sub-clustering should have grouped these together at the floor,
@@ -431,6 +499,7 @@ def decide_subcluster(
         "runner_up_score": runner_up.score if runner_up else None,
         "margin": round(margin, 3) if margin != float("inf") else None,
         "min_markup_jaccard": round(min_markup_jaccard, 3),
+        "winner_covers_all": winner_covers_all,
         "min_tag_jaccard": round(min_tag_jaccard, 3),
         "max_tag_jaccard": round(max_tag_jaccard, 3),
         "markup_floor_used": markup_floor,
@@ -458,8 +527,12 @@ def decide_cluster(
 def cmd_dry_run(args: argparse.Namespace) -> int:
     out_path = Path(args.out)
     with session_scope() as s:
-        coarse_clusters = find_clusters(s, threshold=args.threshold)
-        print(f"found {len(coarse_clusters)} coarse clusters at threshold {args.threshold}")
+        if args.strategy == "source":
+            coarse_clusters = find_source_clusters(s)
+            print(f"found {len(coarse_clusters)} source-grouped clusters (>=2 visible cards)")
+        else:
+            coarse_clusters = find_clusters(s, threshold=args.threshold)
+            print(f"found {len(coarse_clusters)} embedding clusters at threshold {args.threshold}")
         if not coarse_clusters:
             return 0
 
@@ -474,6 +547,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     n_singleton = sum(1 for c in sub_decisions if len(c["members"]) < 2)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "strategy": args.strategy,
         "threshold": args.threshold,
         "constants": {
             "MARGIN_FACTOR": MARGIN_FACTOR,
@@ -768,10 +842,22 @@ def main(argv: list[str] | None = None) -> int:
         help="cap LLM calls (useful for cost-sanity testing)",
     )
     ap.add_argument(
+        "--strategy",
+        choices=("embedding", "source"),
+        default="embedding",
+        help=(
+            "embedding: cluster by body cosine similarity (default). "
+            "source: cluster by source_id — finds dedup pairs the "
+            "embedding scan missed because bodies don't quite cross "
+            "the cosine threshold (typos, slightly different paragraph "
+            "context). Same two-stage tag sub-clustering applies."
+        ),
+    )
+    ap.add_argument(
         "--threshold",
         type=float,
         default=DEFAULT_THRESHOLD,
-        help=f"cosine-distance cutoff (default {DEFAULT_THRESHOLD})",
+        help=f"cosine-distance cutoff for embedding strategy (default {DEFAULT_THRESHOLD})",
     )
     ap.add_argument(
         "--out",
