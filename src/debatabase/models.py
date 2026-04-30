@@ -79,6 +79,9 @@ class Card(Base):
     topic_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("topics.id")
     )
+    dedup_excluded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     source: Mapped[Source] = relationship(back_populates="cards")
     wiki_upload: Mapped["WikiUpload | None"] = relationship()

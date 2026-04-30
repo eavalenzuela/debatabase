@@ -70,11 +70,13 @@ def find_clusters(
                 WHERE cards.id != a.id
                   AND cards.embedding IS NOT NULL
                   AND cards.canonical_card_id IS NULL
+                  AND NOT cards.dedup_excluded
                 ORDER BY a.embedding <=> cards.embedding
                 LIMIT :k
             ) b ON b.dist < :threshold
             WHERE a.embedding IS NOT NULL
               AND a.canonical_card_id IS NULL
+              AND NOT a.dedup_excluded
         """),
         {"k": neighbors_per_card, "threshold": threshold},
     ).all()

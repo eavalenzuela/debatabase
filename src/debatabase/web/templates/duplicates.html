@@ -39,18 +39,21 @@
   {% for cluster in clusters %}
     <form class="dup-cluster"
           hx-post="/admin/duplicates/canonical"
-          hx-target="closest .dup-cluster .dup-status"
-          hx-swap="innerHTML">
-      <input type="hidden" name="member_ids"
-             value="{{ cluster|map(attribute='card_id')|join(',') }}">
+          hx-target="this"
+          hx-swap="outerHTML">
       <div class="dup-cluster-header">
         <span class="dup-size">{{ cluster|length }} cards</span>
-        <span class="dup-help">pick the canonical — others get hidden from search</span>
+        <span class="dup-help">
+          pick the canonical (others become hidden duplicates),
+          or "split off" any card that's actually distinct
+        </span>
       </div>
       <ul class="dup-list">
         {% for c in cluster %}
           <li class="dup-row">
-            <label>
+            {# member_ids lives inside the <li> so it disappears with the row on split-off #}
+            <input type="hidden" name="member_ids" value="{{ c.card_id }}">
+            <label class="dup-row-label">
               <input type="radio" name="canonical_id" value="{{ c.card_id }}" required>
               <span class="cite">
                 <a href="/sources/{{ c.source_id }}">{{ c.cite_short }}</a> · #{{ c.card_id }}
@@ -59,12 +62,20 @@
                 <a href="/cards/{{ c.card_id }}">{{ c.tag }}</a>
               </span>
             </label>
+            <button type="button"
+                    class="dup-split-off"
+                    title="this card is NOT a duplicate — keep it in search and stop offering it here"
+                    hx-post="/admin/duplicates/exclude"
+                    hx-vals='{"card_id": {{ c.card_id }}}'
+                    hx-target="closest .dup-row"
+                    hx-swap="outerHTML">
+              split off
+            </button>
           </li>
         {% endfor %}
       </ul>
       <div class="dup-actions">
         <button type="submit" class="dup-set">set canonical</button>
-        <span class="dup-status"></span>
       </div>
     </form>
   {% endfor %}

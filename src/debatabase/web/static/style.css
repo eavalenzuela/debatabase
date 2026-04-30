@@ -392,14 +392,41 @@ input[type=search] {
   border-radius: 3px;
 }
 .dup-list { list-style: none; padding: 0; margin: 0 0 0.6rem; }
-.dup-row { padding: 0.35rem 0; border-bottom: 1px dashed var(--border); }
+.dup-row {
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
 .dup-row:last-child { border-bottom: 0; }
-.dup-row label {
+.dup-row-label {
   display: grid;
   grid-template-columns: auto auto 1fr;
   gap: 0.6rem;
   align-items: baseline;
   cursor: pointer;
+  flex: 1;
+}
+.dup-split-off {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.55rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  align-self: center;
+  white-space: nowrap;
+}
+.dup-split-off:hover { color: var(--fg); border-color: var(--fg); }
+.dup-resolved {
+  padding: 0.6rem 0.9rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
 }
 .dup-row .cite { color: var(--muted); font-size: 0.85rem; }
 .dup-row .tag-text {

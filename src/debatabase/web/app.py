@@ -888,29 +888,35 @@ def duplicates_index(
 def set_canonical(
     request: Request,
     canonical_id: int = Form(...),
-    member_ids: str = Form(...),  # comma-separated card_ids in the cluster
+    # Per-row hidden inputs each named "member_ids" — FastAPI/Starlette
+    # collect repeated names into a list. Cards whose <li> got removed
+    # by a prior split-off click naturally drop out of this list, so the
+    # server never re-marks them.
+    member_ids: list[int] = Form(...),
     _user_id: int = Depends(get_current_user_id),
 ):
-    """Mark every member except `canonical_id` as a duplicate of it."""
-    try:
-        ids = [int(x) for x in member_ids.split(",") if x.strip()]
-    except ValueError:
-        return HTMLResponse("invalid member_ids", status_code=400)
-    if canonical_id not in ids:
+    """Mark every member except `canonical_id` as a duplicate of it.
+
+    Returns HTML that REPLACES the entire .dup-cluster (HTMX
+    hx-swap=outerHTML) so the cluster visibly disappears once resolved
+    — this is what the old "swap inner status only" UI was missing.
+    """
+    if canonical_id not in member_ids:
         return HTMLResponse(
             "canonical_id must be one of member_ids", status_code=400
         )
-    others = [i for i in ids if i != canonical_id]
+    others = [i for i in member_ids if i != canonical_id]
     with session_scope() as s:
-        s.execute(
-            sqltext("""
-                UPDATE cards
-                SET canonical_card_id = :canon
-                WHERE id = ANY(:others)
-            """),
-            {"canon": canonical_id, "others": others},
-        )
-        # Also: ensure the canonical is itself NOT marked as a duplicate.
+        if others:
+            s.execute(
+                sqltext("""
+                    UPDATE cards
+                    SET canonical_card_id = :canon
+                    WHERE id = ANY(:others)
+                """),
+                {"canon": canonical_id, "others": others},
+            )
+        # Ensure the canonical itself is NOT marked as a duplicate.
         s.execute(
             sqltext(
                 "UPDATE cards SET canonical_card_id = NULL WHERE id = :id"
@@ -918,9 +924,33 @@ def set_canonical(
             {"id": canonical_id},
         )
     return HTMLResponse(
-        f'<span class="proposed-action-ok">canonical set to '
-        f'card #{canonical_id} ({len(others)} hidden)</span>'
+        f'<div class="dup-resolved">resolved — canonical = '
+        f'<a href="/cards/{canonical_id}">#{canonical_id}</a> '
+        f'({len(others)} hidden)</div>'
     )
+
+
+@app.post("/admin/duplicates/exclude", response_class=HTMLResponse)
+def exclude_from_dedup(
+    request: Request,
+    card_id: int = Form(...),
+    _user_id: int = Depends(get_current_user_id),
+):
+    """Mark a card as "not a duplicate of anything" — it stays visible
+    in /search but never re-appears in a duplicate cluster.
+
+    Returns an empty body so HTMX hx-swap=outerHTML on the row removes
+    the <li> in place. The form's hidden member_ids input lives inside
+    the <li>, so the cluster's submission shrinks naturally.
+    """
+    with session_scope() as s:
+        s.execute(
+            sqltext(
+                "UPDATE cards SET dedup_excluded = true WHERE id = :id"
+            ),
+            {"id": card_id},
+        )
+    return HTMLResponse("")
 
 
 # ---------------------------------------------------------------------------

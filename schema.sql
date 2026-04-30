@@ -91,7 +91,12 @@ CREATE TABLE cards (
     -- imports, but every ingest path stamps it. Filtering on this in
     -- /search is how we keep next year's camp packets from drowning
     -- out (or being drowned out by) prior years.
-    topic_id        BIGINT REFERENCES topics(id) ON DELETE SET NULL
+    topic_id        BIGINT REFERENCES topics(id) ON DELETE SET NULL,
+    -- Set true when the admin explicitly tells /admin/duplicates that
+    -- this card is NOT a duplicate of anything ("split off"). dedup
+    -- skips it on subsequent passes so the cluster doesn't re-surface;
+    -- the card itself still appears in /search normally.
+    dedup_excluded  BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX cards_search_tsv_idx ON cards USING GIN (search_tsv);
 CREATE INDEX cards_source_id_idx ON cards (source_id);
@@ -100,6 +105,7 @@ CREATE INDEX cards_embedding_hnsw_idx ON cards USING hnsw (embedding vector_cosi
 CREATE INDEX cards_canonical_idx ON cards (canonical_card_id)
     WHERE canonical_card_id IS NOT NULL;
 CREATE INDEX cards_topic_idx ON cards (topic_id) WHERE topic_id IS NOT NULL;
+CREATE INDEX cards_dedup_excluded_idx ON cards (dedup_excluded) WHERE dedup_excluded;
 
 -- Controlled vocabulary of argument-type tags. Grown collaboratively
 -- (admin approves each one); never auto-created at ingest time.
