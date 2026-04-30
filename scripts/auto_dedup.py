@@ -32,6 +32,12 @@ Usage
   uv run python -m scripts.auto_dedup --dry-run --out /tmp/dedup-report.json
   # spot-check the JSON
   uv run python -m scripts.auto_dedup --apply /tmp/dedup-report.json
+
+  # Optional LLM tiebreaker pass between dry-run and apply: takes a
+  # report, calls Haiku for ambiguous skips (margin-tight + middling
+  # winner score), writes a new report with those promoted to apply.
+  uv run python -m scripts.auto_dedup --llm-fill /tmp/dedup-report.json \\
+      --out /tmp/dedup-report-llm.json
 """
 
 from __future__ import annotations
@@ -40,6 +46,8 @@ import argparse
 import json
 import random
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -79,11 +87,14 @@ TAG_IDENTICAL_THRESHOLD = 0.85
 TIGHT_MARKUP_JACCARD_FLOOR = 0.50
 # Bypass the relative-margin check when the winner's absolute score is
 # this high. Rationale: a tight margin between two candidates each
-# scoring 0.65+ means both candidates are clean — any consistent pick
-# (we use lowest card_id) is fine. The margin check exists to prevent
-# crowning a slightly-less-bad bad candidate, not to refuse to choose
-# between two good ones.
-GOOD_ENOUGH_FLOOR = 0.65
+# scoring 0.55+ means both candidates are at least passable (sentence-
+# shape tag OR clean cite) — any consistent pick (we use lowest
+# card_id) is fine. The margin check exists to prevent crowning a
+# slightly-less-bad bad candidate, not to refuse to choose between two
+# acceptable ones. Lowered from 0.65 -> 0.55 in v3 after observing
+# that the dominant skip pile is byte-identical-tag clusters scoring
+# in 0.55-0.65 territory (Khrushcheva, Rochowicz, Carliner ...).
+GOOD_ENOUGH_FLOOR = 0.55
 
 
 # ----- scoring -------------------------------------------------------------
@@ -545,14 +556,217 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+# ----- LLM tiebreaker -------------------------------------------------------
+#
+# For sub-clusters the heuristic skipped because of a tight margin AND a
+# merely-passable winner score, ask Haiku to pick. We ONLY rewrite the
+# `decision` and `winner_id` fields; the markup-Jaccard / tag-Jaccard /
+# winner-floor guards still gate elsewhere. Cost: ~$1-3 per full pass at
+# Haiku 4.5 rates with prompt caching on the system prompt.
+
+LLM_MODEL = "claude-haiku-4-5-20251001"
+LLM_MAX_PARALLEL = 8
+
+LLM_SYSTEM_PROMPT = (
+    "You are reviewing a cluster of debate evidence cards that the system "
+    "has identified as near-duplicates of each other (same source article, "
+    "same argument). Your job is to pick the SINGLE best card to be the "
+    "canonical version. The rest will be hidden from search but still "
+    "accessible.\n\n"
+    "Quality criteria, in priority order:\n"
+    "1. TAG QUALITY — prefer a clear, readable tag line that reads like a "
+    "real debate tag. Penalize parser noise: triple-dash separators "
+    "(`---`), bracketed prefixes (`[c]`, `[\\t]`), block-path leakage, "
+    "leading subpoint markers (`1.`, `2)`, `b.`), gratuitous ALL CAPS, "
+    "leading filler like 'This is offense.' or 'AT:'.\n"
+    "2. CITE QUALITY — prefer cites in `Author Year` form (e.g. "
+    "`Roberts 19`, `Garza et al. 16`). Demote bracket-laden or filename-"
+    "looking cites.\n"
+    "3. If multiple candidates are equally good, pick the LOWEST card_id "
+    "(oldest ingest) — the choice is arbitrary so be deterministic.\n\n"
+    "Respond ONLY with JSON: {\"winner_id\": <int>, \"reason\": \"<one "
+    "short sentence>\"}. No prose outside the JSON."
+)
+
+
+def _llm_format_candidates(members: list[dict[str, Any]]) -> str:
+    lines = []
+    for m in members:
+        lines.append(
+            f"- card_id={m['card_id']}  "
+            f"cite=\"{m['cite_short']}\"  "
+            f"tag=\"{m['tag']}\""
+        )
+    return "\n".join(lines)
+
+
+def _llm_pick_canonical(
+    client, members: list[dict[str, Any]]
+) -> tuple[int, str] | None:
+    """Call Haiku with the cluster's candidates; return (winner_id, reason)
+    or None on parse/API failure."""
+    try:
+        # Anthropic SDK is imported lazily so non-LLM modes don't pay the
+        # import cost or require the package at install time for users
+        # only running --dry-run/--apply.
+        msg = client.messages.create(
+            model=LLM_MODEL,
+            max_tokens=200,
+            system=[
+                {
+                    "type": "text",
+                    "text": LLM_SYSTEM_PROMPT,
+                    # Cache the system prompt so each subsequent call in
+                    # the same run only pays the input-token cost on the
+                    # candidate list.
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Candidates ({len(members)}):\n"
+                        + _llm_format_candidates(members)
+                        + "\n\nPick the canonical."
+                    ),
+                }
+            ],
+        )
+        text = "".join(
+            b.text for b in msg.content if getattr(b, "type", None) == "text"
+        ).strip()
+    except Exception as e:
+        print(f"  LLM call failed: {e!r}", file=sys.stderr)
+        return None
+
+    # Lenient JSON extraction (mirrors tagger.py)
+    match = re.search(r"\{[^{}]*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    wid = parsed.get("winner_id")
+    if not isinstance(wid, int):
+        return None
+    valid = {m["card_id"] for m in members}
+    if wid not in valid:
+        return None
+    reason = parsed.get("reason") or ""
+    return wid, str(reason)
+
+
+def _is_llm_eligible(c: dict[str, Any]) -> bool:
+    """Sub-cluster is eligible for LLM if the heuristic skipped on margin
+    AND the winner score is at the lower bound (between WINNER_SCORE_FLOOR
+    and GOOD_ENOUGH_FLOOR — clusters above the good-enough floor are
+    already auto-applied by the heuristic)."""
+    if c.get("decision") != "skip":
+        return False
+    reason = c.get("skip_reason") or ""
+    if "margin too tight" not in reason:
+        return False
+    w_id = c.get("winner_id")
+    w = next((m for m in c.get("members", []) if m["card_id"] == w_id), None)
+    if w is None:
+        return False
+    return WINNER_SCORE_FLOOR <= w["score"] < GOOD_ENOUGH_FLOOR
+
+
+def cmd_llm_fill(args: argparse.Namespace) -> int:
+    from debatabase.config import settings  # avoids top-level cost
+
+    if not settings.anthropic_api_key:
+        print("ANTHROPIC_API_KEY not set", file=sys.stderr)
+        return 2
+
+    from anthropic import Anthropic
+
+    in_path = Path(args.llm_fill)
+    out_path = Path(args.out)
+    payload = json.loads(in_path.read_text())
+    eligible = [c for c in payload["clusters"] if _is_llm_eligible(c)]
+    print(f"eligible for LLM: {len(eligible)}")
+    if args.llm_max is not None:
+        eligible = eligible[: args.llm_max]
+        print(f"capped to: {len(eligible)}")
+
+    if not eligible:
+        out_path.write_text(json.dumps(payload, indent=2))
+        return 0
+
+    client = Anthropic(api_key=settings.anthropic_api_key)
+
+    promoted = 0
+    failed = 0
+    started = time.monotonic()
+
+    def _work(c: dict[str, Any]) -> tuple[dict[str, Any], tuple[int, str] | None]:
+        return c, _llm_pick_canonical(client, c["members"])
+
+    with ThreadPoolExecutor(max_workers=LLM_MAX_PARALLEL) as ex:
+        futures = [ex.submit(_work, c) for c in eligible]
+        for i, fut in enumerate(as_completed(futures), 1):
+            c, result = fut.result()
+            if result is None:
+                failed += 1
+                continue
+            winner_id, reason = result
+            c["winner_id"] = winner_id
+            c["decision"] = "apply"
+            c["decided_by"] = "llm"
+            c["llm_reason"] = reason
+            c["skip_reason"] = None
+            promoted += 1
+            if i % 100 == 0:
+                elapsed = time.monotonic() - started
+                rate = i / elapsed if elapsed else 0
+                print(
+                    f"  {i}/{len(eligible)}  promoted={promoted} failed={failed} "
+                    f"rate={rate:.1f}/s"
+                )
+
+    # Update summary
+    n_apply = sum(1 for c in payload["clusters"] if c["decision"] == "apply")
+    n_skip = sum(1 for c in payload["clusters"] if c["decision"] == "skip")
+    payload["summary"]["apply"] = n_apply
+    payload["summary"]["skip"] = n_skip
+    payload["summary"]["cards_to_hide"] = sum(
+        len(c["members"]) - 1
+        for c in payload["clusters"]
+        if c["decision"] == "apply"
+    )
+    payload["summary"]["llm_promoted"] = promoted
+    payload["summary"]["llm_failed"] = failed
+
+    out_path.write_text(json.dumps(payload, indent=2))
+    print(
+        f"wrote {out_path}\n"
+        f"  promoted={promoted}  failed={failed}  "
+        f"new totals: apply={n_apply}  skip={n_skip}  "
+        f"cards-to-hide={payload['summary']['cards_to_hide']}"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    sub = ap.add_subparsers(dest="cmd", required=False)
-
-    drp = ap.add_argument_group("dry-run")
-    drp = ap
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", default=None, metavar="REPORT")
+    ap.add_argument(
+        "--llm-fill",
+        default=None,
+        metavar="REPORT",
+        help="run Haiku tiebreaker on margin-skipped sub-clusters; reads REPORT, writes --out",
+    )
+    ap.add_argument(
+        "--llm-max",
+        type=int,
+        default=None,
+        help="cap LLM calls (useful for cost-sanity testing)",
+    )
     ap.add_argument(
         "--threshold",
         type=float,
@@ -562,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--out",
         default="dedup-report.json",
-        help="dry-run output path",
+        help="output path for --dry-run or --llm-fill",
     )
     ap.add_argument(
         "--sample",
@@ -573,15 +787,18 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
 
-    if args.dry_run and args.apply:
-        print("--dry-run and --apply are mutually exclusive", file=sys.stderr)
+    modes = sum(1 for x in (args.dry_run, args.apply, args.llm_fill) if x)
+    if modes > 1:
+        print("--dry-run / --apply / --llm-fill are mutually exclusive", file=sys.stderr)
         return 2
     if args.apply:
         return cmd_apply(args)
     if args.dry_run:
         return cmd_dry_run(args)
+    if args.llm_fill:
+        return cmd_llm_fill(args)
 
-    print("specify --dry-run or --apply REPORT", file=sys.stderr)
+    print("specify --dry-run, --apply REPORT, or --llm-fill REPORT", file=sys.stderr)
     return 2
 
 
