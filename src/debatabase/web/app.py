@@ -76,6 +76,16 @@ templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 templates.env.globals["render_card"] = render_card
 templates.env.globals["snippet"] = snippet
 
+# Cache-busting suffix for /static URLs. Resolved at process start from
+# the bundled style.css mtime — every deploy that touches CSS gets a new
+# value, invalidating the Cloudflare and browser caches without needing
+# a manual purge. Templates use it as `{{ static_v }}` (see _base.html).
+try:
+    _static_v = str(int((WEB_DIR / "static" / "style.css").stat().st_mtime))
+except OSError:
+    _static_v = "0"
+templates.env.globals["static_v"] = _static_v
+
 app = FastAPI(title="debatabase")
 
 

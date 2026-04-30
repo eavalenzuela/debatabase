@@ -103,10 +103,6 @@
 {% if alt_cuts %}
   <aside class="alt-cuts">
     <h2>Other cuttings ({{ alt_cuts|length }})</h2>
-    <p class="alt-cuts-help">
-      Same passage, cut by different debaters. Highlights / underlines
-      may differ — that's the lesson in how each team chose to read it.
-    </p>
     <ul class="alt-cuts-list">
       {% for v in alt_cuts %}
         {% set alt = v.card %}
