@@ -44,3 +44,4 @@ eevn_origin.pem
 # Live-host deployment cheat-sheet (IPs, instance IDs, paths). Not
 # secret on its own, but no reason to publish the attack surface.
 DEPLOYMENT_INFORMATION.md
+/dedup-report*.json
