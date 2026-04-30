@@ -150,6 +150,16 @@ input[type=search] {
   border-radius: 4px;
 }
 .active-filter a { color: var(--accent); text-decoration: none; margin-left: 0.3rem; }
+.topic-filter { cursor: help; }
+.topic-select {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, #fff);
+  color: inherit;
+  max-width: 14rem;
+}
 
 /* Card list */
 .section-h {

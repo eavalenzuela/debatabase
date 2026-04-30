@@ -38,7 +38,7 @@ from sqlalchemy import select
 
 from debatabase.bulk import ingest_docx
 from debatabase.db import session_scope
-from debatabase.models import WikiUpload
+from debatabase.models import Topic, WikiUpload
 from debatabase.wiki_filename import parse_wiki_filename
 
 WEEKLY_DATE_RE = re.compile(r"hspolicy25-weekly-(\d{4}-\d{2}-\d{2})")
@@ -81,7 +81,33 @@ def main() -> int:
         action="store_true",
         help="walk the tree and print plans but don't insert",
     )
+    ap.add_argument(
+        "--topic-slug",
+        default=None,
+        help=(
+            "Topic to stamp ingested cards/uploads with. Defaults to the "
+            "topic with is_current=true. Pass an explicit slug when "
+            "ingesting a packet for a year that isn't current yet."
+        ),
+    )
     args = ap.parse_args()
+
+    with session_scope() as s:
+        if args.topic_slug:
+            t = s.scalar(select(Topic).where(Topic.slug == args.topic_slug))
+            if t is None:
+                slugs = [r[0] for r in s.execute(select(Topic.slug))]
+                print(f"--topic-slug={args.topic_slug!r} not found. Known: {sorted(slugs)}",
+                      file=sys.stderr)
+                return 2
+            topic_id: int | None = t.id
+        else:
+            t = s.scalar(select(Topic).where(Topic.is_current.is_(True)))
+            topic_id = t.id if t else None
+    if topic_id is None:
+        print("⚠ no topic resolved (no current topic in DB) — rows will have NULL topic_id")
+    else:
+        print(f"stamping rows with topic_id={topic_id}")
 
     root: Path = args.root
     if not root.is_dir():
@@ -143,6 +169,7 @@ def main() -> int:
                 file_sha256=digest,
                 first_seen=weekly_date,
                 last_seen=weekly_date,
+                topic_id=topic_id,
             )
             s.add(upload)
             s.flush()
@@ -155,6 +182,7 @@ def main() -> int:
                     s,
                     wiki_upload_id=upload_id,
                     use_claude_tagger=False,
+                    topic_id=topic_id,
                 )
             except Exception as e:
                 errors.append(f"{path.name}: ingest failed: {e!r}")

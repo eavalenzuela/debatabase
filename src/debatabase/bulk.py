@@ -368,16 +368,25 @@ def ingest_docx(
     *,
     wiki_upload_id: int | None = None,
     use_claude_tagger: bool | None = None,
+    topic_id: int | None = None,
 ) -> dict:
     """Process one .docx end-to-end. Returns {cards_added, analyticals_added, errors, new_tag_slugs}.
 
     ``wiki_upload_id`` propagates to inserted cards/analyticals so they
-    link back to the disclosed file they came from. ``use_claude_tagger``
-    lets the caller force-disable the Claude tagger (useful for the
-    wiki ingest path, where the corpus is huge and per-card Claude
-    calls would be expensive). When ``None``, falls back to the existing
+    link back to the disclosed file they came from. ``topic_id`` similarly
+    propagates so each card is stamped with the season it was assembled for;
+    when ``None``, falls back to whichever Topic row has ``is_current=true``.
+    ``use_claude_tagger`` lets the caller force-disable the Claude tagger
+    (useful for the wiki ingest path, where the corpus is huge and per-card
+    Claude calls would be expensive). When ``None``, falls back to the existing
     auto-detect behavior (Claude when ANTHROPIC_API_KEY is set).
     """
+    if topic_id is None:
+        from debatabase.models import Topic
+        from sqlalchemy import select as _select
+        topic_id = session.scalar(
+            _select(Topic.id).where(Topic.is_current.is_(True))
+        )
     paragraphs_data = extract_docx(docx_path)
     paragraphs = [
         {
@@ -473,6 +482,7 @@ def ingest_docx(
                     approved_tag_slugs=inferred,
                     status=tag_status,
                     wiki_upload_id=wiki_upload_id,
+                    topic_id=topic_id,
                 )
                 analyticals_added += 1
             else:
@@ -494,6 +504,7 @@ def ingest_docx(
                     session, src, card, inferred,
                     status=tag_status,
                     wiki_upload_id=wiki_upload_id,
+                    topic_id=topic_id,
                 )
                 cards_added += 1
             for slug, _ in inferred:

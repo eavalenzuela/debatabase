@@ -5,20 +5,20 @@
       {% if node.children %}
         <details>
           <summary>
-            <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}">{{ node.label }}</a>
+            <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}&amp;topic={{ topic }}">{{ node.label }}</a>
             <span class="usage">{{ node.n_cards + node.n_analyticals }}</span>
           </summary>
           <ul class="tag-children">
             {% for child in node.children %}
               <li>
-                <a class="tag-link {% if tag == child.slug %}active{% endif %}" href="/search?tag={{ child.slug }}{% if q %}&amp;q={{ q }}{% endif %}">{{ child.label }}</a>
+                <a class="tag-link {% if tag == child.slug %}active{% endif %}" href="/search?tag={{ child.slug }}{% if q %}&amp;q={{ q }}{% endif %}&amp;topic={{ topic }}">{{ child.label }}</a>
                 <span class="usage">{{ child.n_cards + child.n_analyticals }}</span>
               </li>
             {% endfor %}
           </ul>
         </details>
       {% else %}
-        <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}">{{ node.label }}</a>
+        <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}&amp;topic={{ topic }}">{{ node.label }}</a>
         <span class="usage">{{ node.n_cards + node.n_analyticals }}</span>
       {% endif %}
     </li>

@@ -26,11 +26,11 @@
     {% if total_pages > 1 %}
       <nav class="pagination">
         {% if page > 1 %}
-          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page - 1 }}">‹ prev</a>
+          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page - 1 }}">‹ prev</a>
         {% endif %}
         <span>page {{ page }} of {{ total_pages }}</span>
         {% if page < total_pages %}
-          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page + 1 }}">next ›</a>
+          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page + 1 }}">next ›</a>
         {% endif %}
       </nav>
     {% endif %}
@@ -58,7 +58,7 @@
         <div class="snippet">{{ snippet(c.card_text, q)|safe }}</div>
         <div class="tag-chips">
           {% for slug, label in tags_by_card.get(c.id, []) %}
-            <a class="chip" href="/search?tag={{ slug }}">{{ label }}</a>
+            <a class="chip" href="/search?tag={{ slug }}&amp;topic={{ topic }}">{{ label }}</a>
           {% endfor %}
         </div>
         {% if current_workspace_id %}
@@ -80,11 +80,11 @@
   {% if total_pages > 1 %}
     <nav class="pagination">
       {% if page > 1 %}
-        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page - 1 }}">‹ prev</a>
+        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page - 1 }}">‹ prev</a>
       {% endif %}
       <span>page {{ page }} of {{ total_pages }}</span>
       {% if page < total_pages %}
-        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;page={{ page + 1 }}">next ›</a>
+        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page + 1 }}">next ›</a>
       {% endif %}
     </nav>
   {% endif %}

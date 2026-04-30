@@ -12,6 +12,7 @@ Per-file flow:
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import sys
 import traceback
@@ -22,7 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from debatabase.bulk import ingest_docx
 from debatabase.db import session_scope
-from debatabase.models import Analytical, Card, ContentTag, Source
+from debatabase.models import Analytical, Card, ContentTag, Source, Topic
 
 EVIDENCE_ROOT = Path("Evidence")
 PARSED_ROOT = Path("parsed_docs")
@@ -71,7 +72,43 @@ def move_to_parsed(src: Path) -> Path:
     return dst
 
 
+def resolve_topic_id(slug: str | None) -> int | None:
+    """Slug → topic_id, or current topic if slug is None. Errors if the
+    slug doesn't match any row, since silently falling back would
+    misattribute a whole camp packet to the wrong year."""
+    with session_scope() as s:
+        if slug:
+            row = s.scalar(select(Topic).where(Topic.slug == slug))
+            if row is None:
+                slugs = [r[0] for r in s.execute(select(Topic.slug))]
+                raise SystemExit(
+                    f"--topic-slug={slug!r} not found. Known: {sorted(slugs)}"
+                )
+            return row.id
+        row = s.scalar(select(Topic).where(Topic.is_current.is_(True)))
+        return row.id if row else None
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--topic-slug",
+        default=None,
+        help=(
+            "Topic to stamp ingested cards with. Defaults to whichever topic "
+            "has is_current=true. Use this when ingesting a packet for a "
+            "year that isn't current yet (e.g. summer ingest of 2026-27 camp "
+            "packets while the live site still defaults to 2025-26)."
+        ),
+    )
+    args = ap.parse_args()
+
+    topic_id = resolve_topic_id(args.topic_slug)
+    if topic_id is None:
+        print("⚠ no topic resolved (no current topic in DB) — cards will have NULL topic_id")
+    else:
+        print(f"Stamping cards with topic_id={topic_id}")
+
     files = collect_docx_files(EVIDENCE_ROOT)
     print(f"Found {len(files)} candidate .docx files in Evidence/\n")
 
@@ -98,7 +135,8 @@ def main() -> None:
                 # scripts/batched_retag.py (cached batches, ~10x cheaper
                 # than per-card calls at this corpus scale).
                 stats = ingest_docx(fp, s, save_jsonl_to=jsonl_path,
-                                    use_claude_tagger=False)
+                                    use_claude_tagger=False,
+                                    topic_id=topic_id)
             ca = stats["cards_added"]
             an = stats["analyticals_added"]
             new_tags = stats["new_tag_slugs"]

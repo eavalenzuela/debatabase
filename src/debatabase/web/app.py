@@ -63,6 +63,7 @@ from debatabase.models import (
     CardVariant,
     ContentTag,
     Source,
+    Topic,
     User,
     WikiUpload,
     Workspace,
@@ -367,7 +368,7 @@ def logout(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request):
-    return _search(request, q=None, tag=None, page=1)
+    return _search(request, q=None, tag=None, topic=None, page=1)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -375,6 +376,7 @@ def search(
     request: Request,
     q: str | None = Query(default=None),
     tag: str | None = Query(default=None),
+    topic: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
 ):
     # Only charge the rate-limit when there's a query string to embed —
@@ -383,7 +385,7 @@ def search(
         check_rate_limit(
             request, SEARCH_BURST, SEARCH_HOURLY, prefix="search"
         )
-    return _search(request, q=q, tag=tag, page=page)
+    return _search(request, q=q, tag=tag, topic=topic, page=page)
 
 
 def _vector_literal(vec: list[float]) -> str:
@@ -405,17 +407,51 @@ def _embed_query_safe(q: str) -> list[float] | None:
         return None
 
 
-def _search(request: Request, q: str | None, tag: str | None, page: int):
+def _resolve_topic(s: Session, topic_param: str | None) -> Topic | None:
+    """Map ``?topic=`` to a Topic row, or None for "all topics".
+
+    - ``None`` (param absent) → the current topic (is_current=true), if any.
+    - ``"all"`` → None (explicit opt-out — search every topic).
+    - A slug → that Topic, or None if it doesn't exist (treated as "all").
+    """
+    if topic_param == "all":
+        return None
+    if topic_param:
+        return s.scalar(select(Topic).where(Topic.slug == topic_param))
+    return s.scalar(select(Topic).where(Topic.is_current.is_(True)))
+
+
+def _search(
+    request: Request,
+    q: str | None,
+    tag: str | None,
+    topic: str | None,
+    page: int,
+):
     offset = (page - 1) * PAGE_SIZE
     qvec = _embed_query_safe(q) if q else None
     semantic_active = qvec is not None
     with session_scope() as s:
+        # Resolve the topic filter once. `active_topic` is the row used to
+        # filter results AND to render the chip / tooltip. `topic_param`
+        # is what we round-trip through pagination/tag links so the user's
+        # explicit "all" choice survives navigation.
+        active_topic = _resolve_topic(s, topic)
+        topic_param = topic if topic else (
+            active_topic.slug if active_topic is not None else "all"
+        )
+        all_topics = s.execute(
+            select(Topic).order_by(Topic.season_start.desc(), Topic.id.desc())
+        ).scalars().all()
+
         # Base card-fetch query
         params: dict = {}
 
         # Build WHERE clauses for cards. Non-canonical (duplicate)
         # cards never surface in search — see /admin/duplicates.
         where_clauses = [sqltext("cards.canonical_card_id IS NULL")]
+        if active_topic is not None:
+            where_clauses.append(Card.topic_id == active_topic.id)
         if q:
             # tsvector match OR substring match against author_last/cite_short.
             # When semantic is on, also include cards whose embedding is
@@ -504,6 +540,8 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
                 .params(q=q)
                 .limit(20)
             )
+            if active_topic is not None:
+                anal_stmt = anal_stmt.where(Analytical.topic_id == active_topic.id)
             analyticals = s.execute(anal_stmt).scalars().all()
 
         # Tags per card for chips
@@ -518,9 +556,18 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
             for cid, slug, label in tag_rows:
                 tags_by_card.setdefault(cid, []).append((slug, label))
 
-        # Counts for header
-        n_cards = s.execute(select(func.count(Card.id))).scalar_one()
-        n_anal = s.execute(select(func.count(Analytical.id))).scalar_one()
+        # Counts for header. Cards/analyticals are scoped to the active
+        # topic so the header reflects what the user is actually browsing;
+        # sources and tags are cross-topic vocabulary and stay global.
+        n_cards_stmt = select(func.count(Card.id)).where(
+            Card.canonical_card_id.is_(None)
+        )
+        n_anal_stmt = select(func.count(Analytical.id))
+        if active_topic is not None:
+            n_cards_stmt = n_cards_stmt.where(Card.topic_id == active_topic.id)
+            n_anal_stmt = n_anal_stmt.where(Analytical.topic_id == active_topic.id)
+        n_cards = s.execute(n_cards_stmt).scalar_one()
+        n_anal = s.execute(n_anal_stmt).scalar_one()
         n_sources = s.execute(select(func.count(Source.id))).scalar_one()
         n_tags = s.execute(select(func.count(ContentTag.id))).scalar_one()
 
@@ -553,6 +600,9 @@ def _search(request: Request, q: str | None, tag: str | None, page: int):
         {
             "q": q or "",
             "tag": tag or "",
+            "topic": topic_param,
+            "active_topic": active_topic,
+            "all_topics": all_topics,
             "cards": cards,
             "analyticals": analyticals,
             "tags_by_card": tags_by_card,

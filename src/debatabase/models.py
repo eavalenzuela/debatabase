@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -21,6 +22,19 @@ from debatabase.embeddings import EMBEDDING_DIM
 
 class Base(DeclarativeBase):
     pass
+
+
+class Topic(Base):
+    __tablename__ = "topics"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    season_start: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    season_end: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    short_name: Mapped[str] = mapped_column(Text, nullable=False)
+    resolution: Mapped[str] = mapped_column(Text, nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Source(Base):
@@ -62,9 +76,13 @@ class Card(Base):
     wiki_upload_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("wiki_uploads.id")
     )
+    topic_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("topics.id")
+    )
 
     source: Mapped[Source] = relationship(back_populates="cards")
     wiki_upload: Mapped["WikiUpload | None"] = relationship()
+    topic: Mapped["Topic | None"] = relationship()
     content_tag_links: Mapped[list["CardContentTag"]] = relationship(
         back_populates="card", cascade="all, delete-orphan"
     )
@@ -112,8 +130,12 @@ class Analytical(Base):
     wiki_upload_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("wiki_uploads.id")
     )
+    topic_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("topics.id")
+    )
 
     wiki_upload: Mapped["WikiUpload | None"] = relationship()
+    topic: Mapped["Topic | None"] = relationship()
     content_tag_links: Mapped[list["AnalyticalContentTag"]] = relationship(
         back_populates="analytical", cascade="all, delete-orphan"
     )
@@ -263,3 +285,8 @@ class WikiUpload(Base):
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    topic_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("topics.id")
+    )
+
+    topic: Mapped["Topic | None"] = relationship()

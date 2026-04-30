@@ -100,6 +100,7 @@ def insert_card(
     *,
     status: str = "approved",
     wiki_upload_id: int | None = None,
+    topic_id: int | None = None,
 ) -> Card:
     """Insert a card and its tag links.
 
@@ -119,6 +120,7 @@ def insert_card(
         block_path=card.block_path,
         ingested_at=datetime.now(UTC),
         wiki_upload_id=wiki_upload_id,
+        topic_id=topic_id,
     )
     session.add(c)
     session.flush()
@@ -142,6 +144,7 @@ def insert_analytical(
     *,
     status: str = "approved",
     wiki_upload_id: int | None = None,
+    topic_id: int | None = None,
 ) -> Analytical:
     a = Analytical(
         argument=data.argument,
@@ -151,6 +154,7 @@ def insert_analytical(
         block_path=data.block_path,
         ingested_at=datetime.now(UTC),
         wiki_upload_id=wiki_upload_id,
+        topic_id=topic_id,
     )
     session.add(a)
     session.flush()

@@ -12,7 +12,7 @@
         hx-get="/search"
         hx-target="#results"
         hx-push-url="true"
-        hx-trigger="input changed delay:250ms from:input[name='q'], submit"
+        hx-trigger="input changed delay:250ms from:input[name='q'], change from:select[name='topic'], submit"
         hx-sync="this:replace"
         hx-indicator="#search-indicator"
       >
@@ -21,12 +21,29 @@
           value="{{ q }}" autofocus autocomplete="off"
         >
         <input type="hidden" name="tag" value="{{ tag }}">
+        <select name="topic" class="topic-select" aria-label="Topic">
+          {% for t in all_topics %}
+            <option value="{{ t.slug }}"
+                    title="{{ t.resolution }}"
+                    {% if topic == t.slug %}selected{% endif %}>
+              {{ t.short_name }} ({{ t.season_start }}–{{ '%02d' % (t.season_end % 100) }})
+            </option>
+          {% endfor %}
+          <option value="all" {% if topic == 'all' %}selected{% endif %}>All topics</option>
+        </select>
         <span id="search-indicator" class="htmx-indicator search-indicator" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>
           <span class="search-indicator-text">searching…</span>
         </span>
         {% if tag %}
-          <span class="active-filter">tag: <code>{{ tag }}</code> <a href="/search?q={{ q }}">×</a></span>
+          <span class="active-filter">tag: <code>{{ tag }}</code>
+            <a href="/search?q={{ q }}&amp;topic={{ topic }}">×</a></span>
+        {% endif %}
+        {% if active_topic %}
+          <span class="active-filter topic-filter" title="{{ active_topic.resolution }}">
+            topic: <code>{{ active_topic.short_name }}
+              ({{ active_topic.season_start }}–{{ '%02d' % (active_topic.season_end % 100) }})</code>
+          </span>
         {% endif %}
       </form>
     </section>

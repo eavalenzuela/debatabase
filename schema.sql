@@ -7,6 +7,26 @@ CREATE EXTENSION IF NOT EXISTS citext;
 -- search). Requires the pgvector/pgvector:pg16 image (set in docker-compose).
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- A debate topic season: one Policy resolution per year. Cards / analyticals
+-- / wiki_uploads are tagged with the topic they were assembled FOR — distinct
+-- from the source's publication year (sources.year), which is when the
+-- underlying article/book came out. Filtering on `topic_id` is what lets
+-- students browse "this year's evidence" once next year's camp packets land.
+CREATE TABLE topics (
+    id              BIGSERIAL PRIMARY KEY,
+    slug            TEXT NOT NULL UNIQUE,                -- e.g. "2025-2026-arctic"
+    season_start    SMALLINT NOT NULL,                   -- fall-of year, e.g. 2025
+    season_end      SMALLINT NOT NULL,                   -- spring-of year, e.g. 2026
+    short_name      TEXT NOT NULL,                       -- "Arctic" — for chips/dropdowns
+    resolution      TEXT NOT NULL,                       -- full "Resolved: ..." text
+    is_current      BOOLEAN NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (season_start, season_end)
+);
+-- At most one current topic at a time. Partial unique index = "is_current
+-- TRUE row is unique; FALSE rows are unconstrained."
+CREATE UNIQUE INDEX topics_one_current_idx ON topics (is_current) WHERE is_current;
+
 -- A source is a single citable work (article, book, etc.). Multiple cards
 -- may be cut from the same source; we dedupe at the source level so
 -- author/qualifications/url stay consistent across cards.
@@ -66,7 +86,12 @@ CREATE TABLE cards (
     -- user's personal corpus. The FK is added by ALTER TABLE after
     -- wiki_uploads is defined below — we keep cards' DDL ordering
     -- stable so existing migrations / dumps don't get re-shuffled.
-    wiki_upload_id  BIGINT
+    wiki_upload_id  BIGINT,
+    -- Topic season this card was cut for. NULL is allowed for legacy
+    -- imports, but every ingest path stamps it. Filtering on this in
+    -- /search is how we keep next year's camp packets from drowning
+    -- out (or being drowned out by) prior years.
+    topic_id        BIGINT REFERENCES topics(id) ON DELETE SET NULL
 );
 CREATE INDEX cards_search_tsv_idx ON cards USING GIN (search_tsv);
 CREATE INDEX cards_source_id_idx ON cards (source_id);
@@ -74,6 +99,7 @@ CREATE INDEX cards_tag_trgm_idx ON cards USING GIN (tag gin_trgm_ops);
 CREATE INDEX cards_embedding_hnsw_idx ON cards USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX cards_canonical_idx ON cards (canonical_card_id)
     WHERE canonical_card_id IS NOT NULL;
+CREATE INDEX cards_topic_idx ON cards (topic_id) WHERE topic_id IS NOT NULL;
 
 -- Controlled vocabulary of argument-type tags. Grown collaboratively
 -- (admin approves each one); never auto-created at ingest time.
@@ -113,6 +139,7 @@ CREATE TABLE analyticals (
     source_file     TEXT,
     block_path      TEXT[],
     ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    topic_id        BIGINT REFERENCES topics(id) ON DELETE SET NULL,
 
     search_tsv      TSVECTOR GENERATED ALWAYS AS (
         to_tsvector('english', coalesce(argument, ''))
@@ -120,6 +147,7 @@ CREATE TABLE analyticals (
 );
 CREATE INDEX analyticals_search_tsv_idx ON analyticals USING GIN (search_tsv);
 CREATE INDEX analyticals_argument_trgm_idx ON analyticals USING GIN (argument gin_trgm_ops);
+CREATE INDEX analyticals_topic_idx ON analyticals (topic_id) WHERE topic_id IS NOT NULL;
 
 CREATE TABLE analytical_content_tags (
     analytical_id   BIGINT NOT NULL REFERENCES analyticals(id) ON DELETE CASCADE,
@@ -220,11 +248,13 @@ CREATE TABLE wiki_uploads (
     file_sha256     TEXT NOT NULL UNIQUE,
     first_seen      DATE NOT NULL,
     last_seen       DATE NOT NULL,
-    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    topic_id        BIGINT REFERENCES topics(id) ON DELETE SET NULL
 );
 CREATE INDEX wiki_uploads_school_idx ON wiki_uploads (school);
 CREATE INDEX wiki_uploads_team_idx ON wiki_uploads (school, team);
 CREATE INDEX wiki_uploads_tournament_idx ON wiki_uploads (tournament, side);
+CREATE INDEX wiki_uploads_topic_idx ON wiki_uploads (topic_id) WHERE topic_id IS NOT NULL;
 
 -- Now that wiki_uploads exists, wire up the FKs from cards/analyticals.
 ALTER TABLE cards
@@ -246,3 +276,18 @@ SELECT setval(pg_get_serial_sequence('users', 'id'), 1, true);
 INSERT INTO workspaces (id, user_id, name) VALUES (1, 1, 'My Workspace');
 SELECT setval(pg_get_serial_sequence('workspaces', 'id'), 1, true);
 UPDATE users SET current_workspace_id = 1 WHERE id = 1;
+
+-- Seed the current Policy topic. New ingests stamp this topic by default
+-- (see scripts/bulk_ingest.py and scripts/ingest_wiki_dump.py). The
+-- partial unique index on is_current keeps "current" to one row at a time.
+INSERT INTO topics (id, slug, season_start, season_end, short_name, resolution, is_current)
+VALUES (
+    1,
+    '2025-2026-arctic',
+    2025,
+    2026,
+    'Arctic',
+    'Resolved: The United States federal government should substantially increase its security and/or economic cooperation with the Kingdom of Denmark, the Republic of Finland, the Republic of Iceland, the Kingdom of Norway, and/or the Kingdom of Sweden in the Arctic.',
+    true
+);
+SELECT setval(pg_get_serial_sequence('topics', 'id'), 1, true);
