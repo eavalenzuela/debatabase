@@ -61,10 +61,29 @@ JACCARD_FLOOR = 0.80
 # would otherwise pass the relative-margin check just because all
 # candidates are equally bad. Sends the cluster to manual review.
 WINNER_SCORE_FLOOR = 0.50
-# Tag-token Jaccard between winner and each loser: catches false-
-# positive embedding clusters where the bodies cluster on shared
-# boilerplate but the actual *arguments* (tag lines) are different.
+# Tag-token Jaccard between cards. Used both:
+#   (a) to split each embedding-similarity "coarse" cluster into
+#       tag-coherent sub-clusters (connected components at >=floor),
+#   (b) inside a sub-cluster, as a sanity check between the winner
+#       and each loser.
+# Same floor for both — using one threshold for "considered the same
+# argument" is simpler than two and gives identical false-positive rate.
 TAG_TOKEN_JACCARD_FLOOR = 0.30
+# When tags within a sub-cluster are essentially identical
+# (max pairwise tag-token Jaccard >= this), drop the markup-span
+# Jaccard requirement to TIGHT_MARKUP_JACCARD_FLOOR. Rationale:
+# identical tags + different markup is "alt-cuts of the same argument
+# with different highlighting choices" — pedagogically captured by
+# the alt-cuts sidebar, so safe to canonicalize.
+TAG_IDENTICAL_THRESHOLD = 0.85
+TIGHT_MARKUP_JACCARD_FLOOR = 0.50
+# Bypass the relative-margin check when the winner's absolute score is
+# this high. Rationale: a tight margin between two candidates each
+# scoring 0.65+ means both candidates are clean — any consistent pick
+# (we use lowest card_id) is fine. The margin check exists to prevent
+# crowning a slightly-less-bad bad candidate, not to refuse to choose
+# between two good ones.
+GOOD_ENOUGH_FLOOR = 0.65
 
 
 # ----- scoring -------------------------------------------------------------
@@ -281,79 +300,146 @@ def score_card(row: dict[str, Any]) -> CardScore:
     )
 
 
-def decide_cluster(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Score, rank, apply guard rules. Returns a dict for the JSON report."""
+def split_by_tag(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Partition a coarse (embedding-similarity) cluster into tag-coherent
+    sub-clusters via union-find on pairwise tag-token Jaccard.
+
+    Two cards land in the same sub-cluster iff their tags share enough
+    content-word tokens (>= TAG_TOKEN_JACCARD_FLOOR). Singleton groups
+    are emitted unchanged so the caller can count "isolated" cards.
+    """
+    n = len(rows)
+    if n <= 1:
+        return [rows] if rows else []
+
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    tags = [r["tag"] or "" for r in rows]
+    # Pairwise — n is small (typically <20) so O(n^2) is fine.
+    for i in range(n):
+        for j in range(i + 1, n):
+            if tag_token_jaccard(tags[i], tags[j]) >= TAG_TOKEN_JACCARD_FLOOR:
+                union(i, j)
+
+    groups: dict[int, list[dict[str, Any]]] = {}
+    for i, r in enumerate(rows):
+        groups.setdefault(find(i), []).append(r)
+    # Stable order: by smallest card_id within each group, group order by min id
+    return sorted(
+        (sorted(g, key=lambda r: r["id"]) for g in groups.values()),
+        key=lambda g: g[0]["id"],
+    )
+
+
+def decide_subcluster(
+    rows: list[dict[str, Any]], coarse_cluster_id: int, sub_index: int
+) -> dict[str, Any]:
+    """Score + rank + apply guard rules for a single tag-coherent sub-cluster."""
     scores = [score_card(r) for r in rows]
-    scores.sort(key=lambda c: (-c.score, c.card_id))  # high score first; lowest id breaks ties
+    scores.sort(key=lambda c: (-c.score, c.card_id))
 
     winner = scores[0]
     runner_up = scores[1] if len(scores) > 1 else None
 
-    # Markup Jaccard: winner vs each loser
     by_id = {r["id"]: r for r in rows}
     losers = [c for c in scores if c.card_id != winner.card_id]
-    jaccards = [
+    markup_jaccards = [
         jaccard(by_id[winner.card_id]["markup"], by_id[c.card_id]["markup"])
         for c in losers
     ]
-    min_jaccard = min(jaccards) if jaccards else 1.0
+    min_markup_jaccard = min(markup_jaccards) if markup_jaccards else 1.0
 
-    # Tag-token Jaccard: winner.tag vs each loser.tag. Low values flag
-    # false-positive clusters where bodies overlap on boilerplate but
-    # the actual arguments are distinct.
-    tag_jaccards = [
-        tag_token_jaccard(winner.tag, c.tag) for c in losers
-    ]
+    tag_jaccards = [tag_token_jaccard(winner.tag, c.tag) for c in losers]
     min_tag_jaccard = min(tag_jaccards) if tag_jaccards else 1.0
+    max_tag_jaccard = max(tag_jaccards) if tag_jaccards else 1.0
 
-    decision = "apply"
-    skip_reason: str | None = None
+    # Soften markup-Jaccard when tags are essentially identical (the
+    # "same argument, different highlighting" pedagogical case — alt-cuts
+    # sidebar preserves the markup variation, so canonicalizing is safe).
+    tag_tight = max_tag_jaccard >= TAG_IDENTICAL_THRESHOLD
+    markup_floor = TIGHT_MARKUP_JACCARD_FLOOR if tag_tight else JACCARD_FLOOR
 
     if runner_up and runner_up.score > 0:
         margin = winner.score / max(runner_up.score, 1e-6)
     else:
         margin = float("inf")
 
-    if winner.score < WINNER_SCORE_FLOOR:
+    decision = "apply"
+    skip_reason: str | None = None
+
+    if len(rows) < 2:
+        decision = "skip"
+        skip_reason = "singleton — no peer to canonicalize against"
+    elif winner.score < WINNER_SCORE_FLOOR:
         decision = "skip"
         skip_reason = (
             f"winner score {winner.score} < absolute floor {WINNER_SCORE_FLOOR} — "
             f"all candidates are low-quality (likely parser noise)"
         )
-    elif margin < MARGIN_FACTOR:
+    elif margin < MARGIN_FACTOR and winner.score < GOOD_ENOUGH_FLOOR:
         decision = "skip"
         skip_reason = (
-            f"margin too tight ({margin:.2f} < {MARGIN_FACTOR}) — top two are "
-            f"#{winner.card_id} ({winner.score}) and #{runner_up.card_id if runner_up else '-'} "
-            f"({runner_up.score if runner_up else '-'})"
+            f"margin too tight ({margin:.2f} < {MARGIN_FACTOR}) and "
+            f"winner score {winner.score} < good-enough floor {GOOD_ENOUGH_FLOOR}"
         )
-    elif min_jaccard < JACCARD_FLOOR:
+    elif min_markup_jaccard < markup_floor:
         decision = "skip"
         skip_reason = (
-            f"markup Jaccard too low ({min_jaccard:.2f} < {JACCARD_FLOOR}) — "
-            f"alternate cuttings have meaningfully different highlight/underline "
-            f"and would lose pedagogical signal if hidden"
+            f"markup Jaccard {min_markup_jaccard:.2f} < {markup_floor} "
+            f"(tag_tight={tag_tight})"
         )
     elif min_tag_jaccard < TAG_TOKEN_JACCARD_FLOOR:
+        # Sub-clustering should have grouped these together at the floor,
+        # so a winner-vs-loser failure here is genuinely surprising —
+        # keep the guard as a tripwire rather than removing it.
         decision = "skip"
         skip_reason = (
-            f"tag-token Jaccard too low ({min_tag_jaccard:.2f} < "
-            f"{TAG_TOKEN_JACCARD_FLOOR}) — likely a false-positive cluster "
-            f"(bodies cluster on shared boilerplate but tags describe "
-            f"different arguments)"
+            f"tag-token Jaccard {min_tag_jaccard:.2f} < "
+            f"{TAG_TOKEN_JACCARD_FLOOR} despite sub-clustering "
+            f"(should not happen; investigate)"
         )
 
     return {
+        "coarse_cluster_id": coarse_cluster_id,
+        "sub_index": sub_index,
+        "tag_tight": tag_tight,
         "members": [asdict(c) for c in scores],
         "winner_id": winner.card_id,
         "winner_score": winner.score,
         "runner_up_score": runner_up.score if runner_up else None,
         "margin": round(margin, 3) if margin != float("inf") else None,
-        "min_jaccard": round(min_jaccard, 3),
+        "min_markup_jaccard": round(min_markup_jaccard, 3),
         "min_tag_jaccard": round(min_tag_jaccard, 3),
+        "max_tag_jaccard": round(max_tag_jaccard, 3),
+        "markup_floor_used": markup_floor,
         "decision": decision,
         "skip_reason": skip_reason,
     }
+
+
+def decide_cluster(
+    rows: list[dict[str, Any]], coarse_cluster_id: int
+) -> list[dict[str, Any]]:
+    """Two-stage: split a coarse cluster by tag, then decide each sub-cluster.
+
+    Returns a flat list of per-sub-cluster decision dicts.
+    """
+    sub_clusters = split_by_tag(rows)
+    return [
+        decide_subcluster(sub, coarse_cluster_id, i)
+        for i, sub in enumerate(sub_clusters)
+    ]
 
 
 # ----- CLI entry points -----------------------------------------------------
@@ -361,47 +447,63 @@ def decide_cluster(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def cmd_dry_run(args: argparse.Namespace) -> int:
     out_path = Path(args.out)
     with session_scope() as s:
-        clusters = find_clusters(s, threshold=args.threshold)
-        print(f"found {len(clusters)} clusters at threshold {args.threshold}")
-        if not clusters:
+        coarse_clusters = find_clusters(s, threshold=args.threshold)
+        print(f"found {len(coarse_clusters)} coarse clusters at threshold {args.threshold}")
+        if not coarse_clusters:
             return 0
 
-        report_clusters = []
-        for cluster in clusters:
+        sub_decisions: list[dict[str, Any]] = []
+        for coarse_id, cluster in enumerate(coarse_clusters):
             ids = [m.card_id for m in cluster]
             rows = hydrate_cluster(s, ids)
-            report_clusters.append(decide_cluster(rows))
+            sub_decisions.extend(decide_cluster(rows, coarse_id))
 
-    n_apply = sum(1 for c in report_clusters if c["decision"] == "apply")
-    n_skip = len(report_clusters) - n_apply
+    n_apply = sum(1 for c in sub_decisions if c["decision"] == "apply")
+    n_skip = sum(1 for c in sub_decisions if c["decision"] == "skip")
+    n_singleton = sum(1 for c in sub_decisions if len(c["members"]) < 2)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "threshold": args.threshold,
-        "margin_factor": MARGIN_FACTOR,
-        "jaccard_floor": JACCARD_FLOOR,
+        "constants": {
+            "MARGIN_FACTOR": MARGIN_FACTOR,
+            "JACCARD_FLOOR": JACCARD_FLOOR,
+            "WINNER_SCORE_FLOOR": WINNER_SCORE_FLOOR,
+            "TAG_TOKEN_JACCARD_FLOOR": TAG_TOKEN_JACCARD_FLOOR,
+            "TAG_IDENTICAL_THRESHOLD": TAG_IDENTICAL_THRESHOLD,
+            "TIGHT_MARKUP_JACCARD_FLOOR": TIGHT_MARKUP_JACCARD_FLOOR,
+            "GOOD_ENOUGH_FLOOR": GOOD_ENOUGH_FLOOR,
+        },
         "summary": {
-            "clusters": len(report_clusters),
+            "coarse_clusters": len(coarse_clusters),
+            "sub_clusters": len(sub_decisions),
+            "singletons_dropped": n_singleton,
             "apply": n_apply,
             "skip": n_skip,
             "cards_to_hide": sum(
-                len(c["members"]) - 1 for c in report_clusters if c["decision"] == "apply"
+                len(c["members"]) - 1 for c in sub_decisions if c["decision"] == "apply"
             ),
         },
-        "clusters": report_clusters,
+        "clusters": sub_decisions,
     }
     out_path.write_text(json.dumps(payload, indent=2))
     print(f"wrote {out_path}")
-    print(f"  apply: {n_apply}   skip: {n_skip}   cards-to-hide: {payload['summary']['cards_to_hide']}")
+    print(
+        f"  coarse={len(coarse_clusters)}  sub={len(sub_decisions)}  "
+        f"apply={n_apply}  skip={n_skip}  singletons={n_singleton}  "
+        f"cards-to-hide={payload['summary']['cards_to_hide']}"
+    )
 
     if args.sample > 0 and n_apply:
-        applied = [c for c in report_clusters if c["decision"] == "apply"]
+        applied = [c for c in sub_decisions if c["decision"] == "apply"]
         sample = random.sample(applied, min(args.sample, len(applied)))
         print(f"\n--- random sample of {len(sample)} 'apply' decisions ---")
         for c in sample:
             w = next(m for m in c["members"] if m["card_id"] == c["winner_id"])
             print(
-                f"\n  cluster (winner #{w['card_id']}, score {w['score']}, "
-                f"margin {c['margin']}, jaccard {c['min_jaccard']}):"
+                f"\n  cluster #{c['coarse_cluster_id']}.{c['sub_index']} "
+                f"(winner #{w['card_id']}, score {w['score']}, "
+                f"margin {c['margin']}, mk_jacc {c['min_markup_jaccard']}, "
+                f"tag_jacc {c['min_tag_jaccard']}, tight={c['tag_tight']}):"
             )
             print(f"    WIN  [{w['cite_short']}]  {w['tag'][:90]}")
             for m in c["members"]:
