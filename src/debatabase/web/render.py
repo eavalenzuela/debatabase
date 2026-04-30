@@ -25,24 +25,46 @@ def render_card(text: str, markup: list[dict], mode: RenderMode = "full") -> str
         return escape(text)
 
     if mode == "highlight-only":
+        # Each shown chunk IS a highlight span — wrap in <mark class="hl">
+        # so the highlight color + underline (highlight implies underline
+        # per project policy) is preserved. Underlines that don't overlap
+        # any highlight aren't shown in this mode.
         spans = sorted(
             (s for s in markup if s["kind"] == "highlight"),
             key=lambda s: s["start"],
         )
-        parts = []
-        for s in spans:
-            parts.append(escape(text[s["start"]:s["end"]]))
-        return ' <span class="ellipsis">…</span> '.join(p for p in parts if p)
+        parts = [
+            f'<mark class="hl">{escape(text[s["start"]:s["end"]])}</mark>'
+            for s in spans if s["end"] > s["start"]
+        ]
+        return ' <span class="ellipsis">…</span> '.join(parts)
 
     if mode == "underline-only":
-        spans = sorted(
+        # Each shown chunk IS an underline span. Within, any highlight
+        # subsection should still render as highlighted so a reader can
+        # see what the cutter chose to read aloud. Reuse _render_full on
+        # the substring with clipped + rebased markup.
+        u_spans = sorted(
             (s for s in markup if s["kind"] == "underline"),
             key=lambda s: s["start"],
         )
-        parts = []
-        for s in spans:
-            parts.append(escape(text[s["start"]:s["end"]]))
-        return ' <span class="ellipsis">…</span> '.join(p for p in parts if p)
+        h_spans = [s for s in markup if s["kind"] == "highlight"]
+        parts: list[str] = []
+        for u in u_spans:
+            if u["end"] <= u["start"]:
+                continue
+            local = [{"start": 0, "end": u["end"] - u["start"], "kind": "underline"}]
+            for h in h_spans:
+                ls = max(h["start"], u["start"])
+                le = min(h["end"], u["end"])
+                if le > ls:
+                    local.append({
+                        "start": ls - u["start"],
+                        "end": le - u["start"],
+                        "kind": "highlight",
+                    })
+            parts.append(_render_full(text[u["start"]:u["end"]], local))
+        return ' <span class="ellipsis">…</span> '.join(parts)
 
     # full mode: properly nested HTML respecting both kinds
     return _render_full(text, markup)

@@ -611,12 +611,6 @@ input[type=search] {
   text-decoration-thickness: 1.5px;
   padding: 0;
 }
-.card-body.mode-highlight-only mark.hl,
-.card-body.mode-underline-only u.ul {
-  /* In highlight-only mode, the inner text isn't wrapped — just shown plain */
-  background: transparent;
-  text-decoration: none;
-}
 .card-body .ellipsis { color: var(--muted); }
 
 /* Tags index */
