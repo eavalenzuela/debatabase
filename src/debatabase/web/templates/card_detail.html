@@ -1,7 +1,16 @@
 {% extends "_base.html" %}
 {% block title %}{{ card.tag[:60] }} · debatabase{% endblock %}
 {% block content %}
+<div class="card-detail-layout">
 <article class="card-detail">
+  {% if canonical_of %}
+    <div class="duplicate-banner">
+      This is an alternate cutting. The canonical version is
+      <a href="/cards/{{ canonical_of.id }}">
+        {{ canonical_of.source.cite_short }} · #{{ canonical_of.id }}
+      </a>.
+    </div>
+  {% endif %}
   <h1 class="tag">{{ card.tag }}</h1>
 
   <div class="meta">
@@ -90,4 +99,46 @@
     <div id="answers-{{ card.id }}"></div>
   {% endif %}
 </article>
+
+{% if alt_cuts %}
+  <aside class="alt-cuts">
+    <h2>Other cuttings ({{ alt_cuts|length }})</h2>
+    <p class="alt-cuts-help">
+      Same passage, cut by different debaters. Highlights / underlines
+      may differ — that's the lesson in how each team chose to read it.
+    </p>
+    <ul class="alt-cuts-list">
+      {% for v in alt_cuts %}
+        {% set alt = v.card %}
+        <li class="alt-cut">
+          <a class="alt-cut-link" href="/cards/{{ alt.id }}">
+            <div class="alt-cut-prov">
+              {% if alt.wiki_upload %}
+                <strong>{{ alt.wiki_upload.school }} {{ alt.wiki_upload.team }}</strong>
+                · {{ alt.wiki_upload.side }}
+                {% if alt.wiki_upload.tournament %} · {{ alt.wiki_upload.tournament }}{% endif %}
+                {% if alt.wiki_upload.round_name %} · {{ alt.wiki_upload.round_name }}{% endif %}
+              {% elif alt.source_file %}
+                <strong>{{ alt.source_file }}</strong>
+              {% else %}
+                <strong>card #{{ alt.id }}</strong>
+              {% endif %}
+            </div>
+            {% if alt.tag and alt.tag != card.tag %}
+              <div class="alt-cut-tag">{{ alt.tag[:140] }}{% if alt.tag|length > 140 %}…{% endif %}</div>
+            {% endif %}
+            <div class="alt-cut-meta">
+              {% if alt.source.cite_short and alt.source.cite_short != card.source.cite_short %}
+                cite: <em>{{ alt.source.cite_short }}</em> ·
+              {% endif %}
+              {{ v.highlight_count }} highlight{{ '' if v.highlight_count == 1 else 's' }}
+              · {{ v.underline_count }} underline{{ '' if v.underline_count == 1 else 's' }}
+            </div>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  </aside>
+{% endif %}
+</div>
 {% endblock %}

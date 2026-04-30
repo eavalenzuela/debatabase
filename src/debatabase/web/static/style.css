@@ -486,6 +486,58 @@ input[type=search] {
 .chip.proposed { background: #fff3cd; color: #856404; }
 
 /* Card detail */
+.card-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: 2rem;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .card-detail-layout { grid-template-columns: 1fr; }
+}
+.duplicate-banner {
+  padding: 0.6rem 0.9rem;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+.duplicate-banner a { color: var(--accent); font-weight: 500; }
+.alt-cuts {
+  border-left: 1px solid var(--border);
+  padding-left: 1.4rem;
+}
+.alt-cuts h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.4rem;
+}
+.alt-cuts-help { font-size: 0.82rem; color: var(--muted); margin: 0 0 1rem; }
+.alt-cuts-list { list-style: none; padding: 0; margin: 0; }
+.alt-cut { border-bottom: 1px dashed var(--border); }
+.alt-cut:last-child { border-bottom: 0; }
+.alt-cut-link {
+  display: block;
+  padding: 0.7rem 0;
+  text-decoration: none;
+  color: inherit;
+}
+.alt-cut-link:hover { background: var(--accent-soft); }
+.alt-cut-prov { font-size: 0.85rem; color: var(--fg); }
+.alt-cut-prov strong { color: var(--accent); font-weight: 600; }
+.alt-cut-tag {
+  font-size: 0.85rem;
+  color: var(--fg);
+  margin: 0.2rem 0;
+  line-height: 1.35;
+}
+.alt-cut-meta { font-size: 0.78rem; color: var(--muted); }
+.alt-cut-meta em { font-style: normal; font-weight: 500; color: var(--fg); }
+
 .card-detail h1.tag {
   font-size: 1.4rem;
   line-height: 1.3;

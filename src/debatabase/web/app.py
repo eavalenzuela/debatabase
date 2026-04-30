@@ -646,6 +646,29 @@ def card_detail(
             .join(CardContentTag, CardContentTag.content_tag_id == ContentTag.id)
             .where(CardContentTag.card_id == card_id)
         ).all()
+
+        # Pedagogical sidebar: when this card IS canonical, show every
+        # alternative cutting (cards whose canonical_card_id points here).
+        # When this card IS a duplicate, show a banner pointing at its
+        # canonical so direct-link users know the "main" version.
+        alt_cuts: list[Card] = []
+        canonical_of: Card | None = None
+        if card.canonical_card_id is None:
+            alt_cuts = list(s.execute(
+                select(Card)
+                .where(Card.canonical_card_id == card.id)
+                .order_by(Card.id.desc())
+                .options(
+                    joinedload(Card.source),
+                    joinedload(Card.wiki_upload),
+                )
+            ).scalars().unique().all())
+        else:
+            canonical_of = s.get(
+                Card, card.canonical_card_id,
+                options=[joinedload(Card.source)],
+            )
+
         current_user_id = request.session.get("user_id")
         current_workspace_id = None
         if current_user_id is not None:
@@ -660,6 +683,20 @@ def card_detail(
     has_underline = any(s["kind"] == "underline" for s in (card.markup or []))
     can_find_answers = has_inverse_capability() and has_embedding_key()
 
+    def _markup_counts(spans: list[dict]) -> tuple[int, int]:
+        h = sum(1 for s in (spans or []) if s.get("kind") == "highlight")
+        u = sum(1 for s in (spans or []) if s.get("kind") == "underline")
+        return h, u
+
+    alt_cuts_view = [
+        {
+            "card": alt,
+            "highlight_count": _markup_counts(alt.markup)[0],
+            "underline_count": _markup_counts(alt.markup)[1],
+        }
+        for alt in alt_cuts
+    ]
+
     return templates.TemplateResponse(
         request,
         "card_detail.html",
@@ -671,6 +708,8 @@ def card_detail(
             "has_underline": has_underline,
             "current_workspace_id": current_workspace_id,
             "can_find_answers": can_find_answers,
+            "alt_cuts": alt_cuts_view,
+            "canonical_of": canonical_of,
         },
     )
 
