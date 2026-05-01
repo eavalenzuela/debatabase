@@ -101,6 +101,17 @@ def main() -> None:
             "packets while the live site still defaults to 2025-26)."
         ),
     )
+    ap.add_argument(
+        "--dedup",
+        action="store_true",
+        help="run the full dedup pipeline after ingest (heuristic-only).",
+    )
+    ap.add_argument(
+        "--dedup-llm",
+        action="store_true",
+        help="like --dedup but enables Haiku-using steps (tag regen + LLM "
+             "tiebreaker on margin-skipped clusters). Implies --dedup.",
+    )
     args = ap.parse_args()
 
     topic_id = resolve_topic_id(args.topic_slug)
@@ -183,6 +194,14 @@ def main() -> None:
         print(f"\n--- DB after run ---")
         print(f"  cards={len(n_cards)}  analyticals={len(n_anal)}  "
               f"sources={len(n_src)}  content_tags={len(n_tags)}")
+
+    # Post-ingest dedup hook. Skipped automatically if no cards landed
+    # (idempotent regardless, but no point spinning up the pipeline
+    # against an unchanged corpus).
+    if (args.dedup or args.dedup_llm) and total_cards > 0:
+        from scripts.run_dedup import run_pipeline
+        print("\n=== running post-ingest dedup ===")
+        run_pipeline(use_llm=args.dedup_llm)
 
 
 if __name__ == "__main__":

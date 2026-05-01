@@ -90,6 +90,16 @@ def main() -> int:
             "ingesting a packet for a year that isn't current yet."
         ),
     )
+    ap.add_argument(
+        "--dedup",
+        action="store_true",
+        help="run the full dedup pipeline after ingest (heuristic-only).",
+    )
+    ap.add_argument(
+        "--dedup-llm",
+        action="store_true",
+        help="like --dedup but enables Haiku-using steps. Implies --dedup.",
+    )
     args = ap.parse_args()
 
     with session_scope() as s:
@@ -215,6 +225,12 @@ def main() -> int:
         print("\nfirst few errors:")
         for e in errors[:10]:
             print(f"  {e}")
+
+    # Post-ingest dedup hook (skipped when no new uploads landed).
+    if (args.dedup or args.dedup_llm) and (new_uploads > 0 or cards_added > 0):
+        from scripts.run_dedup import run_pipeline
+        print("\n=== running post-ingest dedup ===")
+        run_pipeline(use_llm=args.dedup_llm)
     return 0
 
 
