@@ -216,8 +216,26 @@ def _tag_tree(session) -> list[dict]:
             by_id[node["parent_id"]]["children"].append(node)
         else:
             roots.append(node)
-    # Re-sort: root tags by total usage desc; children alphabetical
-    roots.sort(key=lambda n: -(n["n_cards"] + n["n_analyticals"]))
+
+    # Roll up subtree totals so a parent's displayed count includes all
+    # descendant pairings. Without this, parents of recently-reparented
+    # children (e.g. the K-family umbrellas, regime-fragility) show as 0
+    # in the sidebar because their direct pairings are negligible.
+    def _rollup(node: dict) -> tuple[int, int]:
+        c, a = node["n_cards"], node["n_analyticals"]
+        for child in node["children"]:
+            cc, ca = _rollup(child)
+            c += cc
+            a += ca
+        node["n_cards_total"] = c
+        node["n_analyticals_total"] = a
+        return c, a
+    for node in by_id.values():
+        if node["parent_id"] not in by_id:
+            _rollup(node)
+
+    # Re-sort: root tags by subtree-total usage desc; children alphabetical.
+    roots.sort(key=lambda n: -(n["n_cards_total"] + n["n_analyticals_total"]))
     for n in by_id.values():
         n["children"].sort(key=lambda c: c["slug"])
     return roots
@@ -488,12 +506,26 @@ def _search(
                 select(ContentTag.id).where(ContentTag.slug == tag)
             ).scalar_one_or_none()
             if tag_id_row is not None:
-                where_clauses.append(
-                    Card.id.in_(
-                        select(CardContentTag.card_id)
-                        .where(CardContentTag.content_tag_id == tag_id_row)
+                # Filter on the tag AND any of its descendants — clicking a
+                # parent tag (e.g. economic-and-structural-kritiks) should
+                # match cards tagged with any child (cap-k, gramsci, etc.).
+                # WITH RECURSIVE walks the parent_id tree from the clicked
+                # tag downward, collecting every descendant id.
+                where_clauses.append(sqltext("""
+                    cards.id IN (
+                        SELECT cct.card_id FROM card_content_tags cct
+                        WHERE cct.content_tag_id IN (
+                            WITH RECURSIVE descendants AS (
+                                SELECT id FROM content_tags WHERE id = :tag_root_id
+                                UNION ALL
+                                SELECT ct.id FROM content_tags ct
+                                JOIN descendants d ON ct.parent_id = d.id
+                            )
+                            SELECT id FROM descendants
+                        )
                     )
-                )
+                """))
+                params["tag_root_id"] = tag_id_row
 
         # Card list query
         card_stmt = (

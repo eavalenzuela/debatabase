@@ -651,12 +651,18 @@ input[type=search] {
 .sidebar {
   border-left: 1px solid var(--border);
   padding-left: 1.5rem;
+  /* Right padding leaves room for the vertical scrollbar without
+     clipping the +/− disclosure markers on the right edge. */
+  padding-right: 1rem;
   font-size: 0.9rem;
   align-self: start;
   position: sticky;
   top: 1rem;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
+  /* Reserve scrollbar gutter so layout doesn't shift when content
+     grows past viewport height. */
+  scrollbar-gutter: stable;
 }
 .sidebar h3 {
   margin: 0 0 0.7rem;
