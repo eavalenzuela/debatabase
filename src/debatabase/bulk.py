@@ -1,8 +1,6 @@
 """Shared auto-ingest pipeline used by bulk processing.
 
-The functions here mirror what `ingest_jim_code.py` and
-`ingest_abolition_remaining.py` do per-doc, factored out so a bulk runner can
-process arbitrary .docx files uniformly.
+Processes arbitrary .docx files uniformly via a bulk runner.
 
 Invariants:
 - raw_cite is always preserved verbatim.
