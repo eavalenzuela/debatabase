@@ -55,6 +55,21 @@ def apply_op(
     raise ValueError(f"unknown action: {action!r}")
 
 
+def merge_markups(*span_lists: list[Span]) -> list[Span]:
+    """Union several markup lists into one normalized list.
+
+    Used by the "adopt markup" flow on card detail: a duplicate cutting's
+    underlines/highlights are merged into the canonical card. Offsets must
+    refer to the same text — callers are responsible for checking that the
+    card texts match before merging. Purely additive: every span present in
+    any input survives (possibly coalesced) in the output.
+    """
+    combined: list[Span] = []
+    for spans in span_lists:
+        combined.extend(spans or [])
+    return _normalize(combined)
+
+
 def _subtract(spans: list[Span], lo: int, hi: int) -> list[Span]:
     """Remove [lo, hi) from each span, splitting straddlers in two."""
     out: list[Span] = []

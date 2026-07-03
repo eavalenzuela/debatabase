@@ -1,0 +1,64 @@
+{% extends "_base.html" %}
+{% block title %}Sources · debatabase{% endblock %}
+{% block content %}
+<section class="sources-index">
+  <h1>Sources ({{ total }})</h1>
+  <form class="sources-filter" method="get" action="/sources">
+    <input type="search" name="q" placeholder="Filter by author, cite, publication, title…"
+           value="{{ q }}" autocomplete="off">
+    <button type="submit">filter</button>
+    {% if q %}
+      <span class="active-filter">filter: <code>{{ q }}</code>
+        <a href="/sources">×</a></span>
+    {% endif %}
+  </form>
+
+  {% if not rows %}
+    <p class="empty">No sources match.{% if q %} Try a shorter substring.{% endif %}</p>
+  {% else %}
+    <div class="results-meta">
+      <h2 class="section-h">showing {{ start_idx }}–{{ end_idx }} of {{ total }}</h2>
+      {% if total_pages > 1 %}
+        <nav class="pagination">
+          {% if page > 1 %}
+            <a href="/sources?q={{ q|urlencode }}&amp;page={{ page - 1 }}">‹ prev</a>
+          {% endif %}
+          <span>page {{ page }} of {{ total_pages }}</span>
+          {% if page < total_pages %}
+            <a href="/sources?q={{ q|urlencode }}&amp;page={{ page + 1 }}">next ›</a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    </div>
+
+    <table class="source-table">
+      <thead><tr><th>Cite</th><th>Publication</th><th>Title</th><th>Year</th><th class="num">Cards</th></tr></thead>
+      <tbody>
+        {% for source, n_cards in rows %}
+          <tr>
+            <td><a href="/sources/{{ source.id }}"><strong>{{ source.cite_short }}</strong></a>
+              {% if source.author_full %}<br><small class="author">{{ source.author_full }}</small>{% endif %}
+            </td>
+            <td>{{ source.publication or '' }}</td>
+            <td class="src-title">{% if source.title %}"{{ source.title[:90] }}{% if source.title|length > 90 %}…{% endif %}"{% endif %}</td>
+            <td class="num">{{ source.year or '' }}</td>
+            <td class="num">{{ n_cards }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+      <nav class="pagination">
+        {% if page > 1 %}
+          <a href="/sources?q={{ q|urlencode }}&amp;page={{ page - 1 }}">‹ prev</a>
+        {% endif %}
+        <span>page {{ page }} of {{ total_pages }}</span>
+        {% if page < total_pages %}
+          <a href="/sources?q={{ q|urlencode }}&amp;page={{ page + 1 }}">next ›</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

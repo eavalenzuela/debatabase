@@ -18,12 +18,15 @@ so ingest never blocks on the LLM.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 
 from anthropic import Anthropic
 
 from debatabase.config import settings
+
+logger = logging.getLogger("debatabase.tagger")
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
 _MAX_BODY_CHARS = 1500
@@ -95,6 +98,10 @@ def propose_tags(
             b.text for b in msg.content if getattr(b, "type", None) == "text"
         ).strip()
     except Exception:
+        # Ingest must never block on the LLM — degrade to "no tags
+        # proposed", but log so a dead key / quota problem is visible
+        # instead of manifesting as a mysteriously untagged corpus.
+        logger.warning("tag proposal call failed; returning []", exc_info=True)
         return []
 
     return _parse_slugs(text, {v.slug for v in vocab})

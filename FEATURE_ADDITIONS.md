@@ -17,7 +17,7 @@ Highlights are round-specific — the 1AC read is long, the 2AC extension is six
 
 - Click-drag selection over rendered card text to set highlight or underline spans.
 - Save as a new card variant row scoped to the editing user's workspace (see #1). Variants are **never** visible on the global card detail page or in global search — only inside the workspace that created them. The original (canonical) card is never mutated.
-- "Target N seconds at my WPM" helper: shrink highlight to fit a time budget.
+- "Target N seconds at my WPM" helper: shrink highlight to fit a time budget. (Read-side shipped: every workspace card shows its highlighted word count + estimated read seconds, and the workspace shows a total — `speech_time.py`. The auto-shrink editor remains open.)
 - Export (#1) picks the workspace's variant when present, falls back to the canonical card otherwise.
 
 ## 3. Semantic search + "find an answer to this card"
@@ -43,7 +43,7 @@ Camp files repeat the same articles with different cuts. Without dedup the corpu
 - ✅ `/admin/duplicates` review UI: lists clusters by descending size, radio-pick the canonical per cluster, one-click sets `canonical_card_id` on the rest.
 - ✅ Search and `/cards/{id}/answers` filter `canonical_card_id IS NULL` so duplicates disappear from results once a canonical is picked.
 
-Not yet (deferred): per-source duplicate detection at ingest time (right now it's purely retroactive); a "merge the markup spans" action that combines multiple cutters' highlights into one canonical card. Both are nice-to-haves, not blockers.
+Not yet (deferred): per-source duplicate detection at ingest time (right now it's purely retroactive). The "merge the markup spans" action shipped as **adopt markup** on card detail — when an alt cut's `card_text` is byte-identical to the canonical, one click unions its underline/highlight spans into the canonical card (`markup_ops.merge_markups`).
 
 ## 5. Opencaselist wiki ingest ✅ shipped (bulk-dump path)
 
@@ -56,7 +56,7 @@ The disclosure wiki is where pre-round prep lives. Reframed during implementatio
 - ✅ Search results and card detail render a "from {school} {team} · {side} · {tournament} {round}" badge on every wiki card. No additional filter UI for v1 — visibility per-row is enough to triage.
 - Claude tagger is force-disabled for the wiki ingest path because the corpus is large enough that per-card Haiku calls would cost real money. Legacy `KEYWORD_RULES` runs free; user can run `scripts/retag_cards.py` later if Claude-quality tagging on wiki cards is desired.
 
-**Deferred (v2)**: opponent inference (requires the live opencaselist pages, which need auth); a scheduled `/admin/wiki-refresh` endpoint or routine that auto-fetches the latest weekly zip; richer wiki-specific filter UI on `/search` (filter by team, by tournament, by round).
+**Deferred (v2)**: opponent inference (requires the live opencaselist pages, which need auth); a scheduled `/admin/wiki-refresh` endpoint or routine that auto-fetches the latest weekly zip; richer wiki-specific filter UI on `/search` (filter by team, by tournament, by round — the school slice shipped: badges are clickable and set `?school=`, with an active-filter chip to clear).
 
 ## 6. IRC-style user accounts (nickname + password, no email) ✅ shipped
 

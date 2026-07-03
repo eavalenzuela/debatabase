@@ -21,6 +21,7 @@
           value="{{ q }}" autofocus autocomplete="off"
         >
         <input type="hidden" name="tag" value="{{ tag }}">
+        <input type="hidden" name="school" value="{{ school }}">
         <select name="topic" class="topic-select" aria-label="Topic">
           {% for t in all_topics %}
             <option value="{{ t.slug }}"
@@ -37,7 +38,11 @@
         </span>
         {% if tag %}
           <span class="active-filter">tag: <code>{{ tag }}</code>
-            <a href="/search?q={{ q }}&amp;topic={{ topic }}">×</a></span>
+            <a href="/search?q={{ q|urlencode }}&amp;topic={{ topic|urlencode }}&amp;school={{ school|urlencode }}">×</a></span>
+        {% endif %}
+        {% if school %}
+          <span class="active-filter">school: <code>{{ school }}</code>
+            <a href="/search?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;topic={{ topic|urlencode }}">×</a></span>
         {% endif %}
         {% if active_topic %}
           <span class="active-filter topic-filter" title="{{ active_topic.resolution }}">

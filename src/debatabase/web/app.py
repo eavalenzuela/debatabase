@@ -12,16 +12,23 @@ Routes:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import re
 from html import escape as html_escape
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select, text as sqltext
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -55,7 +62,7 @@ from debatabase.docx_export import (
     ExportEntry,
     render_workspace_to_docx,
 )
-from debatabase.markup_ops import apply_op
+from debatabase.markup_ops import apply_op, merge_markups
 from debatabase.models import (
     Analytical,
     Card,
@@ -69,12 +76,22 @@ from debatabase.models import (
     Workspace,
     WorkspaceEntry,
 )
+from debatabase.speech_time import (
+    DEFAULT_WPM,
+    format_seconds,
+    highlight_stats,
+)
 from debatabase.web.render import RenderMode, render_card, snippet
+
+logger = logging.getLogger("debatabase.web")
 
 WEB_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 templates.env.globals["render_card"] = render_card
 templates.env.globals["snippet"] = snippet
+templates.env.globals["highlight_stats"] = highlight_stats
+templates.env.globals["format_seconds"] = format_seconds
+templates.env.globals["speech_wpm"] = DEFAULT_WPM
 
 # Cache-busting suffix for /static URLs. Resolved at process start from
 # the bundled style.css mtime — every deploy that touches CSS gets a new
@@ -111,7 +128,7 @@ _PUBLIC_PREFIXES = (
     "/cards/",
     "/analyticals",
 )
-_PUBLIC_EXACT = {"/", "/tags", "/analyticals"}
+_PUBLIC_EXACT = {"/", "/tags", "/analyticals", "/sources", "/healthz"}
 
 
 async def _require_login(request: Request, call_next):
@@ -125,9 +142,29 @@ async def _require_login(request: Request, call_next):
     return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
 
 
+# Baseline security headers on every response. No CSP for now — the
+# templates load HTMX/Sortable from CDNs and use inline scripts, so a
+# useful policy needs a nonce pass first; these three are free wins.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+}
+
+
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 # Order matters: the LAST-added middleware is OUTERMOST and runs first.
 # We need SessionMiddleware to be outermost so request.session is set up
-# by the time _require_login (inner) reads it.
+# by the time _require_login (inner) reads it. The headers middleware
+# only touches the response, so its position relative to the others is
+# immaterial — it sits innermost.
+app.add_middleware(BaseHTTPMiddleware, dispatch=_security_headers)
 app.add_middleware(BaseHTTPMiddleware, dispatch=_require_login)
 # Cookie hardening:
 #   - HttpOnly is on by default (Starlette).
@@ -163,11 +200,18 @@ def get_current_user_id(request: Request) -> int:
     return uid
 
 
+# Auth pages must never be a post-login destination: `?next=/login` would
+# bounce a logged-in user back to /login, which redirects to `next` again
+# — an infinite redirect loop.
+_AUTH_PATHS = ("/login", "/register", "/logout")
+
+
 def _safe_next(raw: str | None, default: str = "/workspaces") -> str:
     """Reject open-redirect targets in the ``next`` param.
 
     Only allow same-origin, single-segment paths starting with ``/``.
-    Strip protocol-relative ``//evil.com`` and absolute URLs.
+    Strip protocol-relative ``//evil.com`` and absolute URLs, and refuse
+    the auth pages themselves (redirect-loop guard).
     """
     if not raw:
         return default
@@ -176,6 +220,9 @@ def _safe_next(raw: str | None, default: str = "/workspaces") -> str:
     # Protocol-relative and back-slash variants both get parsed as
     # cross-origin by some browsers; reject both forms outright.
     if raw.startswith("//") or raw.startswith("/\\"):
+        return default
+    path_part = raw.split("?", 1)[0].rstrip("/")
+    if path_part in _AUTH_PATHS:
         return default
     return raw
 
@@ -239,6 +286,29 @@ def _tag_tree(session) -> list[dict]:
     for n in by_id.values():
         n["children"].sort(key=lambda c: c["slug"])
     return roots
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+@app.get("/healthz")
+def healthz():
+    """Liveness + DB connectivity for deployment monitoring.
+
+    200 with ``{"status": "ok"}`` when the app can round-trip a query to
+    Postgres; 503 otherwise. Public (no session, no rate limit) so an
+    external monitor or load balancer can poll it.
+    """
+    try:
+        with session_scope() as s:
+            s.execute(sqltext("SELECT 1"))
+    except Exception:
+        logger.warning("healthz DB check failed", exc_info=True)
+        return JSONResponse(
+            {"status": "degraded", "db": False}, status_code=503
+        )
+    return JSONResponse({"status": "ok", "db": True})
 
 
 # ---------------------------------------------------------------------------
@@ -318,34 +388,40 @@ def register_submit(
         return _register_error(request, "passwords don't match")
 
     nickname = nickname.strip()
-    with session_scope() as s:
-        clash = s.scalar(select(User).where(User.nickname == nickname))
-        if clash is not None:
-            return _register_error(request, "nickname already taken")
+    try:
+        with session_scope() as s:
+            clash = s.scalar(select(User).where(User.nickname == nickname))
+            if clash is not None:
+                return _register_error(request, "nickname already taken")
 
-        user_id: int
-        if claim_local:
-            any_real = s.scalar(
-                select(func.count(User.id)).where(User.pw_hash.is_not(None))
-            )
-            placeholder = (
-                s.scalar(
-                    select(User)
-                    .where(User.pw_hash.is_(None))
-                    .order_by(User.id)
-                    .limit(1)
+            user_id: int
+            if claim_local:
+                any_real = s.scalar(
+                    select(func.count(User.id)).where(User.pw_hash.is_not(None))
                 )
-                if any_real == 0
-                else None
-            )
-            if placeholder is not None:
-                placeholder.nickname = nickname
-                placeholder.pw_hash = hash_password(password)
-                user_id = placeholder.id
+                placeholder = (
+                    s.scalar(
+                        select(User)
+                        .where(User.pw_hash.is_(None))
+                        .order_by(User.id)
+                        .limit(1)
+                    )
+                    if any_real == 0
+                    else None
+                )
+                if placeholder is not None:
+                    placeholder.nickname = nickname
+                    placeholder.pw_hash = hash_password(password)
+                    user_id = placeholder.id
+                else:
+                    user_id = _create_fresh_user(s, nickname, password)
             else:
                 user_id = _create_fresh_user(s, nickname, password)
-        else:
-            user_id = _create_fresh_user(s, nickname, password)
+    except IntegrityError:
+        # Two registrations of the same nick can both pass the clash
+        # check above; the CITEXT unique constraint catches the loser.
+        # Same user-facing answer as the pre-check, not a 500.
+        return _register_error(request, "nickname already taken")
 
     request.session["user_id"] = user_id
     request.session["user_nick"] = nickname
@@ -396,7 +472,7 @@ def logout(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request):
-    return _search(request, q=None, tag=None, topic=None, page=1)
+    return _search(request, q=None, tag=None, topic=None, school=None, page=1)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -405,6 +481,7 @@ def search(
     q: str | None = Query(default=None),
     tag: str | None = Query(default=None),
     topic: str | None = Query(default=None),
+    school: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
 ):
     # Only charge the rate-limit when there's a query string to embed —
@@ -413,7 +490,7 @@ def search(
         check_rate_limit(
             request, SEARCH_BURST, SEARCH_HOURLY, prefix="search"
         )
-    return _search(request, q=q, tag=tag, topic=topic, page=page)
+    return _search(request, q=q, tag=tag, topic=topic, school=school, page=page)
 
 
 def _vector_literal(vec: list[float]) -> str:
@@ -432,6 +509,9 @@ def _embed_query_safe(q: str) -> list[float] | None:
     try:
         return embed_query(q)
     except Exception:
+        # Search degrades to tsvector-only — keep serving, but leave a
+        # trail so a dead/exhausted Voyage key is visible in the logs.
+        logger.warning("query embedding failed; falling back to keyword-only", exc_info=True)
         return None
 
 
@@ -454,11 +534,13 @@ def _search(
     q: str | None,
     tag: str | None,
     topic: str | None,
+    school: str | None,
     page: int,
 ):
     offset = (page - 1) * PAGE_SIZE
     qvec = _embed_query_safe(q) if q else None
     semantic_active = qvec is not None
+    is_fragment = _is_htmx(request)
     with session_scope() as s:
         # Resolve the topic filter once. `active_topic` is the row used to
         # filter results AND to render the chip / tooltip. `topic_param`
@@ -468,7 +550,9 @@ def _search(
         topic_param = topic if topic else (
             active_topic.slug if active_topic is not None else "all"
         )
-        all_topics = s.execute(
+        # Only the full page renders the topic <select>; HTMX fragment
+        # refreshes don't need the list.
+        all_topics = [] if is_fragment else s.execute(
             select(Topic).order_by(Topic.season_start.desc(), Topic.id.desc())
         ).scalars().all()
 
@@ -526,6 +610,16 @@ def _search(
                     )
                 """))
                 params["tag_root_id"] = tag_id_row
+        if school:
+            # Wiki-provenance filter: cards from any disclosed file
+            # uploaded by this school (badge click / ?school= param).
+            where_clauses.append(
+                Card.wiki_upload_id.in_(
+                    select(WikiUpload.id).where(
+                        func.lower(WikiUpload.school) == school.lower()
+                    )
+                )
+            )
 
         # Card list query
         card_stmt = (
@@ -598,23 +692,27 @@ def _search(
             for cid, slug, label in tag_rows:
                 tags_by_card.setdefault(cid, []).append((slug, label))
 
-        # Counts for header. Cards/analyticals are scoped to the active
-        # topic so the header reflects what the user is actually browsing;
-        # sources and tags are cross-topic vocabulary and stay global.
-        n_cards_stmt = select(func.count(Card.id)).where(
-            Card.canonical_card_id.is_(None)
-        )
-        n_anal_stmt = select(func.count(Analytical.id))
-        if active_topic is not None:
-            n_cards_stmt = n_cards_stmt.where(Card.topic_id == active_topic.id)
-            n_anal_stmt = n_anal_stmt.where(Analytical.topic_id == active_topic.id)
-        n_cards = s.execute(n_cards_stmt).scalar_one()
-        n_anal = s.execute(n_anal_stmt).scalar_one()
-        n_sources = s.execute(select(func.count(Source.id))).scalar_one()
-        n_tags = s.execute(select(func.count(ContentTag.id))).scalar_one()
-
-        # Tag tree for sidebar
-        tag_tree = _tag_tree(s)
+        # Counts for header + tag tree for sidebar. Both are only rendered
+        # by the full page (search.html); HTMX fragment refreshes swap
+        # #results only, so skip these five queries on every debounced
+        # keystroke. Cards/analyticals are scoped to the active topic so
+        # the header reflects what the user is actually browsing; sources
+        # and tags are cross-topic vocabulary and stay global.
+        n_cards = n_anal = n_sources = n_tags = 0
+        tag_tree: list[dict] = []
+        if not is_fragment:
+            n_cards_stmt = select(func.count(Card.id)).where(
+                Card.canonical_card_id.is_(None)
+            )
+            n_anal_stmt = select(func.count(Analytical.id))
+            if active_topic is not None:
+                n_cards_stmt = n_cards_stmt.where(Card.topic_id == active_topic.id)
+                n_anal_stmt = n_anal_stmt.where(Analytical.topic_id == active_topic.id)
+            n_cards = s.execute(n_cards_stmt).scalar_one()
+            n_anal = s.execute(n_anal_stmt).scalar_one()
+            n_sources = s.execute(select(func.count(Source.id))).scalar_one()
+            n_tags = s.execute(select(func.count(ContentTag.id))).scalar_one()
+            tag_tree = _tag_tree(s)
 
         # Current workspace id (None if not logged in) — controls whether
         # the "+ Add to workspace" buttons render.
@@ -635,13 +733,14 @@ def _search(
     start_idx = offset + 1 if cards else 0
     end_idx = offset + len(cards)
 
-    template = "search_results.html" if _is_htmx(request) else "search.html"
+    template = "search_results.html" if is_fragment else "search.html"
     return templates.TemplateResponse(
         request,
         template,
         {
             "q": q or "",
             "tag": tag or "",
+            "school": school or "",
             "topic": topic_param,
             "active_topic": active_topic,
             "all_topics": all_topics,
@@ -735,6 +834,9 @@ def card_detail(
             "card": alt,
             "highlight_count": _markup_counts(alt.markup)[0],
             "underline_count": _markup_counts(alt.markup)[1],
+            # Markup offsets only transfer between identical texts —
+            # the adopt-markup button is offered iff this holds.
+            "same_text": alt.card_text == card.card_text,
         }
         for alt in alt_cuts
     ]
@@ -754,6 +856,44 @@ def card_detail(
             "canonical_of": canonical_of,
         },
     )
+
+
+@app.post("/cards/{card_id}/adopt-markup", response_class=HTMLResponse)
+def adopt_markup(
+    card_id: int,
+    alt_id: int = Form(...),
+    _user_id: int = Depends(get_current_user_id),
+):
+    """Merge an alt cut's underline/highlight spans into the canonical card.
+
+    The deferred "merge the markup spans" action from FEATURE_ADDITIONS.md
+    #4: different cutters mark different parts of the same passage, and
+    the canonical card can absorb the union. Only allowed when the alt is
+    a resolved duplicate of this card AND the two ``card_text``s are
+    byte-identical (span offsets don't transfer otherwise). Additive-only
+    — nothing the canonical already had is removed, so the action is safe
+    to repeat.
+    """
+    with session_scope() as s:
+        card = s.get(Card, card_id)
+        if card is None:
+            return HTMLResponse("card not found", status_code=404)
+        if card.canonical_card_id is not None:
+            return HTMLResponse(
+                "only a canonical card can adopt markup", status_code=400
+            )
+        alt = s.get(Card, alt_id)
+        if alt is None or alt.canonical_card_id != card.id:
+            return HTMLResponse(
+                "alt cut is not a duplicate of this card", status_code=400
+            )
+        if alt.card_text != card.card_text:
+            return HTMLResponse(
+                "card texts differ; markup offsets don't transfer",
+                status_code=400,
+            )
+        card.markup = merge_markups(card.markup or [], alt.markup or [])
+    return RedirectResponse(f"/cards/{card_id}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +926,9 @@ def card_answers(request: Request, card_id: int):
     try:
         inverse = generate_inverse_claim(tag)
     except Exception as e:
+        logger.warning(
+            "inverse-claim generation failed for card %d", card_id, exc_info=True
+        )
         return HTMLResponse(
             f'<p class="answers-error">inverse-claim generation failed: '
             f'{html_escape(type(e).__name__)}</p>',
@@ -794,6 +937,9 @@ def card_answers(request: Request, card_id: int):
     try:
         qvec = embed_query(inverse)
     except Exception as e:
+        logger.warning(
+            "inverse-claim embedding failed for card %d", card_id, exc_info=True
+        )
         return HTMLResponse(
             f'<p class="answers-error">embedding failed: '
             f'{html_escape(type(e).__name__)}</p>',
@@ -997,6 +1143,18 @@ def set_canonical(
                 """),
                 {"canon": canonical_id, "others": others},
             )
+            # Flatten chains: any card that pointed at a member which
+            # just became a duplicate would otherwise reference a
+            # non-canonical card (and its detail banner would point one
+            # hop short of the real canonical). Re-point them here.
+            s.execute(
+                sqltext("""
+                    UPDATE cards
+                    SET canonical_card_id = :canon
+                    WHERE canonical_card_id = ANY(:others)
+                """),
+                {"canon": canonical_id, "others": others},
+            )
         # Ensure the canonical itself is NOT marked as a duplicate.
         s.execute(
             sqltext(
@@ -1061,6 +1219,59 @@ def tags_index(request: Request):
 # ---------------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------------
+
+SOURCES_PAGE_SIZE = 50
+
+
+@app.get("/sources", response_class=HTMLResponse)
+def sources_index(
+    request: Request,
+    q: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+):
+    """Browse every source with its card count, filterable by author /
+    cite / publication / title substring. Pre-this-page, sources were
+    only reachable by clicking through from a card."""
+    offset = (page - 1) * SOURCES_PAGE_SIZE
+    with session_scope() as s:
+        stmt = (
+            select(Source, func.count(Card.id).label("n_cards"))
+            .outerjoin(Card, Card.source_id == Source.id)
+            .group_by(Source.id)
+        )
+        count_stmt = select(func.count(Source.id))
+        if q:
+            like = f"%{q}%"
+            cond = or_(
+                Source.cite_short.ilike(like),
+                Source.author_last.ilike(like),
+                Source.author_full.ilike(like),
+                Source.publication.ilike(like),
+                Source.title.ilike(like),
+            )
+            stmt = stmt.where(cond)
+            count_stmt = count_stmt.where(cond)
+        total = s.execute(count_stmt).scalar_one()
+        rows = s.execute(
+            stmt.order_by(func.count(Card.id).desc(), Source.id)
+            .limit(SOURCES_PAGE_SIZE)
+            .offset(offset)
+        ).all()
+    total_pages = max(1, (total + SOURCES_PAGE_SIZE - 1) // SOURCES_PAGE_SIZE)
+    return templates.TemplateResponse(
+        request,
+        "sources_index.html",
+        {
+            "rows": rows,
+            "q": q or "",
+            "page": page,
+            "total_pages": total_pages,
+            "total": total,
+            "start_idx": offset + 1 if rows else 0,
+            "end_idx": offset + len(rows),
+        },
+    )
+
 
 @app.get("/sources/{source_id}", response_class=HTMLResponse)
 def source_detail(request: Request, source_id: int):
@@ -1176,6 +1387,18 @@ def _entry_markup(entry: WorkspaceEntry) -> list[dict]:
     return []
 
 
+def _speech_total_seconds(entries: list[WorkspaceEntry]) -> int:
+    """Estimated read time of the whole workspace: sum of each card
+    entry's highlighted text at DEFAULT_WPM. Analyticals are debater-
+    authored one-liners with no highlight discipline — skipped."""
+    total = 0
+    for e in entries:
+        if e.card is None:
+            continue
+        total += highlight_stats(e.card.card_text, _entry_markup(e)).seconds
+    return total
+
+
 def _group_entries(
     entries: list[WorkspaceEntry],
 ) -> list[tuple[list[str], list[WorkspaceEntry]]]:
@@ -1199,6 +1422,7 @@ def _entries_fragment(request: Request, ws: Workspace) -> HTMLResponse:
             "ws": ws,
             "groups": _group_entries(entries),
             "n_entries": len(entries),
+            "speech_total_seconds": _speech_total_seconds(entries),
         },
     )
 
@@ -1311,6 +1535,7 @@ def workspace_view(
             "groups": _group_entries(entries),
             "n_entries": len(entries),
             "is_current": is_current,
+            "speech_total_seconds": _speech_total_seconds(entries),
         },
     )
 

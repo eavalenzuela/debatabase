@@ -4,6 +4,12 @@
     <a href="/search">search</a> or any card detail page.
   </p>
 {% else %}
+  {% if speech_total_seconds and speech_total_seconds > 0 %}
+    <div class="ws-speech-total"
+         title="sum of every card's highlighted text at {{ speech_wpm }} words per minute — a planning estimate, not a stopwatch">
+      total in-round read: ~{{ format_seconds(speech_total_seconds) }} @ {{ speech_wpm }} wpm
+    </div>
+  {% endif %}
   {% for path, entries in groups %}
     <div class="ws-group">
       <div class="ws-group-header">
@@ -26,11 +32,17 @@
 
             <div class="ws-entry-body">
               {% if e.card is not none %}
+                {% set hs = highlight_stats(e.card.card_text, effective_markup) %}
                 <div class="cite">
                   <a href="/sources/{{ e.card.source_id }}">{{ e.card.source.cite_short }}</a>
                   {% if e.card.source.publication %} · {{ e.card.source.publication }}{% endif %}
                   {% if has_variant %}
                     <span class="ws-variant-badge" title="this workspace has a re-cut variant of this card">edited</span>
+                  {% endif %}
+                  {% if hs.words > 0 %}
+                    <span class="speech-time"
+                          title="highlighted read at {{ speech_wpm }} words per minute">
+                      {{ hs.words }} words · ~{{ format_seconds(hs.seconds) }}</span>
                   {% endif %}
                 </div>
                 <div class="tag-text">

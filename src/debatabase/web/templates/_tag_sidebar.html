@@ -5,20 +5,20 @@
       {% if node.children %}
         <details>
           <summary>
-            <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}&amp;topic={{ topic }}">{{ node.label }}</a>
+            <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug|urlencode }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}&amp;topic={{ topic|urlencode }}">{{ node.label }}</a>
             <span class="usage" title="includes children">{{ node.n_cards_total + node.n_analyticals_total }}</span>
           </summary>
           <ul class="tag-children">
             {% for child in node.children %}
               <li>
-                <a class="tag-link {% if tag == child.slug %}active{% endif %}" href="/search?tag={{ child.slug }}{% if q %}&amp;q={{ q }}{% endif %}&amp;topic={{ topic }}">{{ child.label }}</a>
+                <a class="tag-link {% if tag == child.slug %}active{% endif %}" href="/search?tag={{ child.slug|urlencode }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}&amp;topic={{ topic|urlencode }}">{{ child.label }}</a>
                 <span class="usage">{{ child.n_cards_total + child.n_analyticals_total }}</span>
               </li>
             {% endfor %}
           </ul>
         </details>
       {% else %}
-        <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug }}{% if q %}&amp;q={{ q }}{% endif %}&amp;topic={{ topic }}">{{ node.label }}</a>
+        <a class="tag-link {% if tag == node.slug %}active{% endif %}" href="/search?tag={{ node.slug|urlencode }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}&amp;topic={{ topic|urlencode }}">{{ node.label }}</a>
         <span class="usage">{{ node.n_cards_total + node.n_analyticals_total }}</span>
       {% endif %}
     </li>

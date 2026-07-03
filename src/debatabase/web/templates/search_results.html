@@ -26,11 +26,11 @@
     {% if total_pages > 1 %}
       <nav class="pagination">
         {% if page > 1 %}
-          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page - 1 }}">‹ prev</a>
+          <a href="/search?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;topic={{ topic|urlencode }}&amp;school={{ school|urlencode }}&amp;page={{ page - 1 }}">‹ prev</a>
         {% endif %}
         <span>page {{ page }} of {{ total_pages }}</span>
         {% if page < total_pages %}
-          <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page + 1 }}">next ›</a>
+          <a href="/search?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;topic={{ topic|urlencode }}&amp;school={{ school|urlencode }}&amp;page={{ page + 1 }}">next ›</a>
         {% endif %}
       </nav>
     {% endif %}
@@ -46,7 +46,9 @@
         </div>
         {% if c.wiki_upload %}
           <div class="wiki-provenance">
-            from <strong>{{ c.wiki_upload.school }} {{ c.wiki_upload.team }}</strong>
+            from <a class="school-filter-link"
+                    title="filter results to {{ c.wiki_upload.school }}"
+                    href="/search?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;topic={{ topic|urlencode }}&amp;school={{ c.wiki_upload.school|urlencode }}"><strong>{{ c.wiki_upload.school }} {{ c.wiki_upload.team }}</strong></a>
             · {{ c.wiki_upload.side }}
             {% if c.wiki_upload.tournament %} · {{ c.wiki_upload.tournament }}{% endif %}
             {% if c.wiki_upload.round_name %} · {{ c.wiki_upload.round_name }}{% endif %}
@@ -58,7 +60,7 @@
         <div class="snippet">{{ snippet(c.card_text, q)|safe }}</div>
         <div class="tag-chips">
           {% for slug, label in tags_by_card.get(c.id, []) %}
-            <a class="chip" href="/search?tag={{ slug }}&amp;topic={{ topic }}">{{ label }}</a>
+            <a class="chip" href="/search?tag={{ slug|urlencode }}&amp;topic={{ topic|urlencode }}">{{ label }}</a>
           {% endfor %}
         </div>
         {% if current_workspace_id %}
@@ -80,11 +82,11 @@
   {% if total_pages > 1 %}
     <nav class="pagination">
       {% if page > 1 %}
-        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page - 1 }}">‹ prev</a>
+        <a href="/search?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;topic={{ topic|urlencode }}&amp;school={{ school|urlencode }}&amp;page={{ page - 1 }}">‹ prev</a>
       {% endif %}
       <span>page {{ page }} of {{ total_pages }}</span>
       {% if page < total_pages %}
-        <a href="/search?q={{ q }}&amp;tag={{ tag }}&amp;topic={{ topic }}&amp;page={{ page + 1 }}">next ›</a>
+        <a href="/search?q={{ q|urlencode }}&amp;tag={{ tag|urlencode }}&amp;topic={{ topic|urlencode }}&amp;school={{ school|urlencode }}&amp;page={{ page + 1 }}">next ›</a>
       {% endif %}
     </nav>
   {% endif %}

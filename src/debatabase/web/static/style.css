@@ -1081,3 +1081,79 @@ input[type=search] {
   margin-left: 0.4rem;
   vertical-align: middle;
 }
+
+/* Wiki school filter (search) */
+.school-filter-link { color: inherit; text-decoration: none; }
+.school-filter-link:hover strong { text-decoration: underline; }
+
+/* Adopt-markup button (card detail alt-cuts sidebar) */
+.alt-cut-adopt { margin: -0.3rem 0 0.7rem; }
+.alt-cut-adopt button {
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 0.15rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.alt-cut-adopt button:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+/* Speech-time estimates (workspace) */
+.speech-time {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-left: 0.4rem;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.ws-speech-total {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.8rem;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+/* Sources index */
+.sources-index h1 { font-size: 1.4rem; margin: 0 0 0.8rem; }
+.sources-filter {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1.2rem;
+}
+.sources-filter input[type=search] {
+  flex: 0 1 26rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+.sources-filter button {
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.sources-filter button:hover { background: var(--accent-soft); border-color: var(--accent); }
+.source-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.source-table th, .source-table td {
+  text-align: left;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.source-table th { background: white; }
+.source-table td.num, .source-table th.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.source-table a { color: var(--fg); text-decoration: none; }
+.source-table a:hover { color: var(--accent); }
+.source-table small.author { color: var(--muted); }
+.source-table .src-title { color: var(--muted); }

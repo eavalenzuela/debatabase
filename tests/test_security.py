@@ -34,6 +34,14 @@ from debatabase.web.app import _safe_next
         ("/\\evil.example", "/workspaces"),  # back-slash variant
         ("javascript:alert(1)", "/workspaces"),
         ("evil.example", "/workspaces"),  # no leading slash
+        # Auth pages as targets → redirect-loop guard kicks in.
+        ("/login", "/workspaces"),
+        ("/login?next=/workspaces", "/workspaces"),
+        ("/login/", "/workspaces"),
+        ("/register", "/workspaces"),
+        ("/logout", "/workspaces"),
+        # ...but longer paths that merely share the prefix are fine.
+        ("/loginshire", "/loginshire"),
     ],
 )
 def test_safe_next_blocks_open_redirect(raw: str | None, expected: str) -> None:
@@ -137,6 +145,22 @@ def test_client_ip_ignores_xff_when_no_trusted_proxies(monkeypatch) -> None:
     monkeypatch.setattr(rate_limit, "_TRUSTED_PROXIES", [])
     req = _make_request(peer="203.0.113.5", xff="198.51.100.9")
     assert rate_limit.client_ip(req) == "203.0.113.5"
+
+
+def test_security_headers_present_on_every_response() -> None:
+    """REQ-NET: baseline security headers are stamped by middleware.
+
+    Exercises a DB-free public page so the test runs without Postgres.
+    """
+    from starlette.testclient import TestClient
+
+    from debatabase.web.app import app
+
+    with TestClient(app) as client:
+        resp = client.get("/login")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["referrer-policy"] == "strict-origin-when-cross-origin"
 
 
 def test_client_ip_honours_xff_only_from_trusted_peer(monkeypatch) -> None:

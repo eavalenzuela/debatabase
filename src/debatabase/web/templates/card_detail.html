@@ -131,6 +131,16 @@
               · {{ v.underline_count }} underline{{ '' if v.underline_count == 1 else 's' }}
             </div>
           </a>
+          {% if v.same_text and request.session.get('user_id') %}
+            <form class="alt-cut-adopt" method="post"
+                  action="/cards/{{ card.id }}/adopt-markup">
+              <input type="hidden" name="alt_id" value="{{ alt.id }}">
+              <button type="submit"
+                      title="merge this cutting's underlines and highlights into the canonical card (additive — nothing is removed)">
+                adopt markup
+              </button>
+            </form>
+          {% endif %}
         </li>
       {% endfor %}
     </ul>

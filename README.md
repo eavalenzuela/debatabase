@@ -15,14 +15,17 @@ A searchable database of policy debate evidence cards. Built to make a personal 
   - Card detail with **render mode toggle**: full / underline-only / **highlight-only (in-round read text)** / plain
   - Hierarchical tag sidebar with collapsible parent groups
   - Pagination with result counts
+  - **Sources browse** — `/sources` lists every source with its card count, filterable by author / cite / publication / title substring
   - **Workspaces** — per-user named speech-doc workspaces. Add cards or analyticals from search or card detail with one click; reorder via drag-and-drop; group entries under editable `header_path` headers; clear; export to `.docx` named after the workspace.
+  - **Speech-time estimates** — each workspace card shows its highlighted word count and estimated read time (at a 270 wpm debate clip), plus a whole-workspace total, so you can tell whether the 1AC actually fits in eight minutes before you're at the podium.
   - **In-browser re-highlighting** — select text in a card body inside a workspace and click highlight / underline / clear. Edits are stored as a workspace-scoped **card variant**; the canonical card is never mutated and global card detail / search continue to show the original. Revert any time.
   - **Find evidence that answers this card** — on card detail (when `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are both set), Claude Haiku rewrites the card's tag as the strongest opposing claim, then vector-searches the corpus for cards closest to that inverse — surfacing the cuts most likely to answer this one.
   - **Claude-assisted tagging** — bulk ingest sends each card to Haiku with the existing `content_tags` vocabulary; output is constrained to known slugs and lands as `status='proposed'` so an admin can promote. `scripts/retag_cards.py` runs the same flow over the existing corpus.
   - **Proposed-tag review** — `/admin/proposed-tags` (login-gated) groups every proposed link by tag with one-click approve / reject.
-  - **Duplicate detection** — `/admin/duplicates` (login-gated) clusters near-duplicate cards by embedding cosine distance and lets you pick a canonical per cluster; non-canonicals get hidden from search and from "answers this card" results.
-  - **Opencaselist wiki ingest** — `scripts/fetch_weekly_dumps.py` + `scripts/ingest_wiki_dump.py` pull the public weekly bulk dumps from the S3 bucket and ingest every disclosed `.docx`. School / team / side / tournament / round metadata is parsed from filenames and surfaced as a badge on each card row. Content-hash dedup means re-ingesting weekly snapshots is cheap.
+  - **Duplicate detection** — `/admin/duplicates` (login-gated) clusters near-duplicate cards by embedding cosine distance and lets you pick a canonical per cluster; non-canonicals get hidden from search and from "answers this card" results. When an alternate cutting has byte-identical text, an **adopt markup** button on card detail merges its underlines/highlights into the canonical (additive union — nothing is removed).
+  - **Opencaselist wiki ingest** — `scripts/fetch_weekly_dumps.py` + `scripts/ingest_wiki_dump.py` pull the public weekly bulk dumps from the S3 bucket and ingest every disclosed `.docx`. School / team / side / tournament / round metadata is parsed from filenames and surfaced as a badge on each card row; clicking the school name filters `/search` to that school's disclosures. Content-hash dedup means re-ingesting weekly snapshots is cheap.
   - **IRC-style auth** — register a nickname + password (no email, no recovery), `argon2` hashed. The card corpus is public; workspace and variant endpoints require login.
+  - **`/healthz`** — JSON liveness + DB connectivity probe for deployment monitoring (200 when Postgres answers, 503 otherwise).
 - **Seed data** — `db_seed.sql` ships with the initial corpus already loaded (2,992 canonical + 360 hidden duplicate cards, 88 analyticals, 2,138 sources, 86 content tags, drawn from ~75 source documents). Includes pre-computed Voyage embeddings so `/search` semantic ranking and `/cards/{id}/answers` work immediately on a fresh install — no backfill required.
 
 ## Domain glossary
@@ -75,6 +78,7 @@ src/debatabase/
   bulk.py                           reusable cite parser + tag inference + map_doc
   docx_export.py                    workspace → .docx (inverse of parser/extract.py)
   markup_ops.py                     pure span-ops for the re-highlighting flow
+  speech_time.py                    highlighted-word-count → read-time estimates
   auth.py                           argon2 hashing + nickname/password validation
   embeddings.py                     Voyage AI client wrapper (semantic search)
   answer_finder.py                  Claude-driven inverse-claim generator
@@ -121,7 +125,7 @@ uv sync --group dev
 uv run pytest
 ```
 
-The suite covers the `.docx` export round-trip (export → re-extract → assert spans match) and the markup-ops merge / split / normalize logic. Web routes are smoke-tested manually for now.
+The suite covers the `.docx` export round-trip (export → re-extract → assert spans match), the markup-ops merge / split / normalize logic, the HTML render modes, the speech-time estimator, the wiki filename parser, and the security-critical helpers (redirect validation, rate-limit IP handling, security headers). Web routes are smoke-tested manually for now.
 
 ## Semantic search (optional)
 
@@ -138,7 +142,7 @@ After backfill, queries against `/search` blend `tsvector` rank with cosine simi
 
 ## Status
 
-Personal tool, single-user-friendly but multi-user-ready. Auth is IRC-style: nickname + password, no email. Read-side and prep-side both work end-to-end: ingest cards → search and browse (publicly) → register an account → assemble cards into a named workspace → re-highlight per round → export `.docx`. Not deployed anywhere.
+Personal tool, single-user-friendly but multi-user-ready. Auth is IRC-style: nickname + password, no email. Read-side and prep-side both work end-to-end: ingest cards → search and browse (publicly) → register an account → assemble cards into a named workspace → re-highlight per round → export `.docx`. A live instance runs at [debate.eevn.io](http://debate.eevn.io/) (see `DEPLOYMENT_INFORMATION.md`).
 
 If you start fresh from `db_seed.sql`, the first time you visit `/register` you'll see a "claim the existing pre-auth workspace data" checkbox — tick it on the first real registration so the bootstrap `local` user becomes you. Subsequent users register normally.
 
